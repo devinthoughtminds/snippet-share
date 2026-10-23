@@ -19,3 +19,9 @@ class PasteCreated(BaseModel):
     id: UUID
     share_url: str
     created_at: datetime
+
+
+class PasteRead(BaseModel):
+    id: UUID
+    text: str
+    created_at: datetime

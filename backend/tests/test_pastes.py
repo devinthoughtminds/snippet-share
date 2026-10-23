@@ -48,3 +48,26 @@ async def test_size_limit_counts_utf8_bytes_not_characters(client):
     assert len(text) < settings.max_paste_bytes
     response = await client.post("/api/v1/pastes", json={"text": text})
     assert response.status_code == 413
+
+
+async def test_get_returns_the_created_paste(client):
+    created = (await client.post("/api/v1/pastes", json={"text": "hello\n  world"})).json()
+
+    response = await client.get(f"/api/v1/pastes/{created['id']}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == created["id"]
+    assert body["text"] == "hello\n  world"
+    assert body["created_at"] == created["created_at"]
+
+
+async def test_get_unknown_id_returns_404(client):
+    response = await client.get(f"/api/v1/pastes/{uuid.uuid4()}")
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("bad_id", ["not-a-uuid", "123", "c9bf9e57-1685"])
+async def test_get_malformed_id_returns_404_not_422(client, bad_id):
+    response = await client.get(f"/api/v1/pastes/{bad_id}")
+    assert response.status_code == 404

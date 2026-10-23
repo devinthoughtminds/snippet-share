@@ -6,8 +6,8 @@ from app.core.config import settings
 DATABASE_URL = settings.database_url
 
 # 2. Create the async engine
-# echo=True logs all SQL queries to the terminal (great for development)
-engine = create_async_engine(DATABASE_URL, echo=True)
+# echo logs every SQL statement with its parameters (paste text included), so debug only
+engine = create_async_engine(DATABASE_URL, echo=settings.debug)
 
 # 3. Create an async session factory
 async_session_maker = async_sessionmaker(

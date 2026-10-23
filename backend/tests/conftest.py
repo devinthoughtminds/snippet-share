@@ -4,18 +4,19 @@ import pytest
 from dotenv import load_dotenv
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 load_dotenv()  # backend/.env; real env vars (Docker, CI) take precedence
 
-from app.core.config import settings  # noqa: E402
 from app.core.dependencies import get_db  # noqa: E402
 from app.main import app  # noqa: E402
 from app.model import Base  # noqa: E402
 
-TEST_DATABASE_URL = os.environ["TEST_DATABASE_URL"]
-# Tests TRUNCATE tables; never let them run against the dev database.
-assert TEST_DATABASE_URL != settings.database_url, "TEST_DATABASE_URL must not be DATABASE_URL"
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
+# Tests drop and truncate tables, so only ever point them at a *_test database.
+if not TEST_DATABASE_URL or not (make_url(TEST_DATABASE_URL).database or "").endswith("_test"):
+    raise pytest.UsageError("TEST_DATABASE_URL must point at a *_test database (see backend/.env.example)")
 
 
 @pytest.fixture(scope="session")

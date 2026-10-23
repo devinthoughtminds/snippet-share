@@ -4,7 +4,8 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import Settings
+from app.core.config import Settings, settings
+from app.core.database import engine
 from app.core.dependencies import get_db
 from app.model import Paste
 
@@ -18,6 +19,11 @@ def test_settings_ignore_unknown_env_keys(tmp_path):
         "TEST_DATABASE_URL=postgresql+asyncpg://u:p@h/db_test\n"
     )
     Settings(_env_file=env)  # raised "Extra inputs are not permitted" before extra="ignore"
+
+
+def test_app_engine_logs_sql_only_in_debug():
+    # echo would write every paste's text into the logs
+    assert engine.echo == settings.debug
 
 
 async def test_get_db_yields_a_session():

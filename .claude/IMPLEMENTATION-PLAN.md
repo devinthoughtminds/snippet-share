@@ -15,16 +15,16 @@ This plan implements [PROJECT-IDEA.md](PROJECT-IDEA.md). Work through the phases
 
 ```
 snippet-share/
-├── docker-compose.yml
-├── docker-compose.dev.yml      # dev only: publishes db 5432 + backend 8000
+├── docker-compose.yml          # production: db, backend, frontend, nginx (only :3000 published)
+├── docker-compose.dev.yml      # override: db + backend on 127.0.0.1, backend hot reload
 ├── .env.example                # Compose: Postgres credentials, PUBLIC_BASE_URL
 ├── db/init/01-test-db.sql      # creates the snippet_test database
 ├── nginx/
 │   └── nginx.conf              # gateway: /api → backend, / → frontend (already written)
 ├── backend/
 │   ├── .env.example            # backend outside Docker: DB URLs, size limit
-│   ├── Dockerfile
-│   ├── requirements.txt
+│   ├── Dockerfile              # uv sync --frozen, non-root
+│   ├── pyproject.toml + uv.lock
 │   ├── pytest.ini
 │   ├── alembic.ini
 │   ├── alembic/                # env.py + versions/
@@ -42,16 +42,16 @@ snippet-share/
     ├── .env.example            # Vite: size limit, dev proxy target
     ├── Dockerfile
     ├── nginx.conf              # static files + SPA fallback only
-    ├── package.json
-    ├── vite.config.js
+    ├── package.json + bun.lock
+    ├── vite.config.ts
     ├── index.html
     └── src/
-        ├── main.jsx            # router
-        ├── api.js              # fetch calls + error mapping
-        ├── CreatePage.jsx
-        ├── ViewPage.jsx
-        ├── styles.css
-        └── *.test.jsx
+        ├── main.tsx            # router
+        ├── api.ts              # axios instance, QueryClient, calls + error mapping
+        ├── CreatePage.tsx
+        ├── ViewPage.tsx
+        ├── index.css
+        └── *.test.tsx
 ```
 
 ---
@@ -60,8 +60,8 @@ snippet-share/
 
 ### Task 0.1: Install tools
 - [ ] Docker Desktop, running (`docker compose version` works).
-- [ ] Python 3.12 or later (`python --version`). Only needed if you want to run the backend outside Docker.
-- [ ] Node.js 22 LTS (`node --version`).
+- [x] uv (`uv --version`). It installs Python 3.14 for the backend itself. If `uv` prints a pyenv message, a pyenv-win shim is shadowing it: put the real uv first on `PATH` or remove the shim.
+- [x] Bun 1.3 (`bun --version`) and Node.js 24 (`node --version`).
 - [ ] Get push access to `devinthoughtminds/snippet-share` (see the failed push earlier).
 
 ### Task 0.2: Repo skeleton
@@ -83,26 +83,19 @@ snippet-share/
 ## Phase 1: Database and backend foundation
 
 ### Task 1.1: Postgres in Compose
-- [ ] Create `docker-compose.yml` with only the `db` service for now:
-  - `image: postgres:16-alpine`
-  - `env_file: .env`
-  - `volumes: [pgdata:/var/lib/postgresql/data, ./db/init:/docker-entrypoint-initdb.d:ro]`
-  - `healthcheck`: `pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}`, every 5 seconds, 10 retries
-  - No `ports:`. The database isn't reachable from the host.
-  - A top-level `volumes: { pgdata: {} }`.
-- [ ] Create `db/init/01-test-db.sql`: `CREATE DATABASE snippet_test;`
-- [ ] Create `docker-compose.dev.yml`, which publishes `db` on `127.0.0.1:5432:5432`. It's for local development only.
+- [x] `docker-compose.yml` has all four services: `db` (`postgres:17-alpine`, `pgdata` volume, `db/init` mounted, `pg_isready` healthcheck, no published port), `backend`, `frontend`, and the `nginx` gateway.
+- [x] `db/init/01-test-db.sql`: `CREATE DATABASE snippet_test;`
+- [x] `docker-compose.dev.yml` is an *override*. It only adds what dev needs: `db` on `127.0.0.1:5432`, `backend` on `127.0.0.1:8000`, a bind mount, and `--reload`.
 - [ ] **Check:** `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db`, then wait until `docker compose ps` shows `healthy`.
 - [ ] **Note:** init scripts only run when the volume is empty. If you created the volume before adding the script, run `docker compose down -v` once.
 - [ ] Commit.
 
 ### Task 1.2: Backend project
-- [ ] Create a virtual environment: `python -m venv backend/.venv`, then activate it.
-- [ ] `backend/requirements.txt`: `fastapi`, `uvicorn[standard]`, `sqlalchemy[asyncio]`, `asyncpg`, `alembic`, `pydantic-settings`, `pytest`, `pytest-asyncio`, `httpx`. Pin the versions you install (`pip freeze`).
+- [x] Dependencies are in `pyproject.toml`, and `uv.lock` pins them. Runtime: `fastapi`, `uvicorn[standard]`, `sqlalchemy[asyncio]`, `asyncpg`, `alembic`, `pydantic-settings`. Dev group: `pytest`, `pytest-asyncio`, `httpx`. Add more with `uv add <pkg>` (or `uv add --dev <pkg>`); never edit `uv.lock` by hand. Run commands with `uv run ...` from `backend/`.
 - [ ] `app/config.py`: a `Settings(BaseSettings)` with `model_config = SettingsConfigDict(env_file=".env")`, fields `database_url`, `public_base_url`, and `max_paste_bytes: int = 1_048_576`, plus a single module-level `settings = Settings()`. Real environment variables take priority over `.env`, which is how Compose overrides the values in Docker. A missing `.env` is ignored.
 - [ ] `app/db.py`: `engine = create_async_engine(settings.database_url)`, `SessionLocal = async_sessionmaker(engine, expire_on_commit=False)`, and an `async def get_session()` dependency that yields a session.
-- [ ] `app/main.py`: `app = FastAPI(title="snippet-share", docs_url="/api/docs", openapi_url="/api/openapi.json")`. The docs live under `/api` so the gateway routes them to the backend.
-- [ ] **Check:** `uvicorn app.main:app --reload` (from `backend/`) starts, and `http://localhost:8000/api/docs` loads.
+- [x] `app/main.py`: `app = FastAPI(title="snippet-share", docs_url="/api/docs", openapi_url="/api/openapi.json")`. The docs live under `/api` so the gateway routes them to the backend.
+- [ ] **Check:** `uv run uvicorn app.main:app --reload` (from `backend/`) starts, and `http://localhost:8000/api/docs` loads.
 - [ ] Commit.
 
 ### Task 1.3: Paste model and first migration
@@ -120,7 +113,7 @@ snippet-share/
   - A fixture that runs `TRUNCATE pastes` before each test.
   - A `client` fixture: `httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test")`, with `app.dependency_overrides[get_session]` pointing at the test engine.
 - [ ] A smoke test: `GET /api/docs` returns 200.
-- [ ] **Check:** `pytest` passes.
+- [ ] **Check:** with the dev `db` running, `uv run pytest` (from `backend/`) passes. It reads `TEST_DATABASE_URL` from `backend/.env`.
 - [ ] Commit.
 
 ---
@@ -183,26 +176,26 @@ snippet-share/
 ## Phase 4: Backend container
 
 ### Task 4.1: Dockerfile
-- [ ] `backend/Dockerfile`: start `FROM python:3.12-slim`, copy `requirements.txt` first and `pip install --no-cache-dir`, then copy the code.
-- [ ] Startup command: `sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"`.
-- [ ] Run as a non-root user (`useradd`, then `USER app`).
-- [ ] Add a `.dockerignore` covering `.env`, `.venv`, `__pycache__`, `tests/.pytest_cache`. Leave `.env` out of the image: secrets must never be baked into it.
+- [x] `backend/Dockerfile`: `python:3.14-slim` plus the uv binary. `uv sync --frozen --no-dev` installs from `uv.lock` into `/opt/venv`, which sits outside `/app` so the dev bind mount doesn't hide it. Runs as the non-root `app` user.
+- [x] `.dockerignore` covers `.env`, `.venv`, `__pycache__`, `.pytest_cache`. Secrets are never baked into the image.
+- [ ] Once Alembic exists (Task 1.3), change the startup command to `sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"`.
 
-### Task 4.2: Add the backend service to Compose
-- [ ] `backend` service. `env_file` brings in `MAX_PASTE_BYTES`. `environment:` replaces the localhost values with Docker ones, and wins over `env_file`. `${...}` values come from the root `.env`:
+### Task 4.2: The backend service in Compose
+- [x] `backend` gets its settings only from `environment:` in `docker-compose.yml`. Compose fills the `${...}` values from the root `.env`. `MAX_PASTE_BYTES` defaults to 1 MB unless the root `.env` sets it:
   ```yaml
     backend:
       build: ./backend
-      env_file: ./backend/.env
       environment:
         DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-        TEST_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/snippet_test
         PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+        MAX_PASTE_BYTES: ${MAX_PASTE_BYTES:-1048576}
+      depends_on:
+        db:
+          condition: service_healthy
   ```
-- [ ] `depends_on: { db: { condition: service_healthy } }`.
-- [ ] No `ports:` in the main file. In `docker-compose.dev.yml`, publish `127.0.0.1:8000:8000`.
+- [x] No `ports:` in the main file. The dev override publishes `127.0.0.1:8000:8000`.
 - [ ] **Check:** `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build db backend`. The logs show the migration running, then Uvicorn starting. Then `curl -X POST localhost:8000/api/v1/pastes -H "content-type: application/json" -d "{\"text\":\"hi\"}"` returns 201.
-- [ ] **Check:** `docker compose run --rm backend pytest` passes. `TEST_DATABASE_URL` already points at `db` inside the container.
+- [ ] **Tests** run on the host (`uv run pytest`) against the dev `db`. The image has no dev dependencies.
 - [ ] Commit.
 
 ---
@@ -210,28 +203,28 @@ snippet-share/
 ## Phase 5: Frontend skeleton
 
 ### Task 5.1: Scaffold
-- [ ] `npm create vite@latest frontend -- --template react`, then `cd frontend && npm install`.
-- [ ] `npm install react-router-dom`
-- [ ] `npm install -D vitest @testing-library/react @testing-library/user-event @testing-library/jest-dom jsdom`
-- [ ] `vite.config.js`:
-  - `test: { environment: "jsdom", setupFiles: "./src/setupTests.js" }`
-  - `server: { proxy: { "/api": env.API_PROXY_TARGET } }`, where `env = loadEnv(mode, process.cwd(), "")` (wrap the config as `defineConfig(({ mode }) => ...)`). Dev builds then call the backend with the same paths as production.
-- [ ] Delete the Vite demo files (the logo, the counter, `App.css`).
+- [x] Vite + React + TypeScript scaffold, with Bun (`bun.lock`).
+- [ ] `bun add react-router-dom`
+- [x] `bun add @tanstack/react-query axios`. `src/api.ts` holds the axios instance (`baseURL: "/api/v1"`) and the `QueryClient` (`staleTime: Infinity`, because pastes never change; `retry: false`, because errors show a **Retry** button). `main.tsx` wraps the app in `QueryClientProvider`.
+- [ ] `bun add -d vitest @testing-library/react @testing-library/user-event @testing-library/jest-dom jsdom`
+- [x] `vite.config.ts` proxies `/api` to `API_PROXY_TARGET` (from `frontend/.env`) in dev, so dev uses the same paths as production.
+- [ ] Add `test: { environment: "jsdom", setupFiles: "./src/setupTests.ts" }` to `vite.config.ts`.
+- [x] Deleted the Vite demo files (`App.css`, assets, `icons.svg`). `App.tsx` is now a placeholder.
 - [ ] Add a `"test": "vitest"` script.
 - [ ] Commit.
 
 ### Task 5.2: Routing
-- [ ] `src/main.jsx`: `createBrowserRouter` with `/` → `CreatePage`, `/view/:id` → `ViewPage`, and `*` → a simple "Page not found" with a link home.
+- [ ] `src/main.tsx`: `createBrowserRouter` with `/` → `CreatePage`, `/view/:id` → `ViewPage`, and `*` → a simple "Page not found" with a link home.
 - [ ] Create placeholder `CreatePage` and `ViewPage` components.
-- [ ] **Check:** `npm run dev`. Visiting `/`, `/view/abc` and `/nope` each shows the right placeholder.
+- [ ] **Check:** `bun run dev`. Visiting `/`, `/view/abc` and `/nope` each shows the right placeholder.
 - [ ] Commit.
 
-### Task 5.3: API client (`src/api.js`)
-- [ ] **Tests first** (`api.test.js`, mocking `fetch` with `vi.fn`):
-  - `createPaste("x")` POSTs JSON to `/api/v1/pastes` and resolves with the parsed body on a 201.
-  - A 413 throws an error with `kind: "too_large"`. A 429 throws `kind: "rate_limited"`, a 422 throws `kind: "invalid"`, a network failure (fetch rejects) throws `kind: "network"`, and anything else throws `kind: "server"`.
+### Task 5.3: API client (`src/api.ts`)
+- [ ] **Tests first** (`api.test.ts`, mocking the instance with `vi.spyOn(api, "post")` / `vi.spyOn(api, "get")`):
+  - `createPaste("x")` POSTs `{ text: "x" }` to `/pastes` and resolves with `response.data` on a 201.
+  - A 413 throws an error with `kind: "too_large"`. A 429 throws `kind: "rate_limited"`, a 422 throws `kind: "invalid"`, an axios error with no `response` (network failure) throws `kind: "network"`, and anything else throws `kind: "server"`.
   - `getPaste(id)` resolves on a 200, and throws `kind: "not_found"` on a 404.
-- [ ] Implement it. **Map errors on the status code, never on the response body.** Nginx returns 413 and 429 as HTML pages, not JSON, so calling `response.json()` on them would crash.
+- [ ] Implement `createPaste` and `getPaste` next to the instance in `api.ts`, catching with `axios.isAxiosError(err)`. **Map errors on `err.response?.status`, never on the body.** Nginx returns 413 and 429 as HTML pages, not JSON.
 - [ ] Commit.
 
 ---
@@ -239,7 +232,7 @@ snippet-share/
 ## Phase 6: Create view (`/`)
 
 ### Task 6.1: Text area and counters
-- [ ] **Tests first** (`CreatePage.test.jsx`):
+- [ ] **Tests first** (`CreatePage.test.tsx`):
   - The text area has focus after the page renders.
   - Typing `hello world` shows "11 characters · 2 words".
   - **Save & Share** is disabled when the text is empty or only whitespace.
@@ -263,7 +256,7 @@ snippet-share/
     - `network`: "Couldn't reach the server" with a **Retry** button
     - `server`: "Something went wrong" with a **Retry** button
   - The text is **kept** after an error. Never lose what the user pasted.
-- [ ] Implement it.
+- [ ] Implement it with `useMutation({ mutationFn: createPaste })`. Disable the button while `isPending`, read the error kind from `error`, and make **Retry** call `mutate(text)` again. Tests wrap the page in a fresh `QueryClientProvider` each time.
 - [ ] Commit.
 
 ### Task 6.3: Share dialog
@@ -281,14 +274,14 @@ snippet-share/
 ## Phase 7: Reader view (`/view/:id`)
 
 ### Task 7.1: Loading and showing a paste
-- [ ] **Tests first** (`ViewPage.test.jsx`, with a mocked `getPaste`):
+- [ ] **Tests first** (`ViewPage.test.tsx`, with a mocked `getPaste`):
   - Shows "Loading…" while the request is in progress.
   - On success, every line of the text appears, in order.
   - Indentation is kept exactly: a line starting with 4 spaces still starts with 4 spaces.
   - `not_found` shows "Snippet not found." and a **New paste** link.
   - A network or server error shows "Couldn't load this snippet" and a **Retry** button.
 - [ ] Implement it:
-  - `useParams()`, with `getPaste(id)` inside a `useEffect`.
+  - `useParams()`, then `useQuery({ queryKey: ["paste", id], queryFn: () => getPaste(id) })`. `isPending` shows "Loading…", and **Retry** calls `refetch()`.
   - The text goes in `<pre>`, one `<span class="line">` per line (`text.split("\n")`), with `white-space: pre-wrap`.
   - **Never use `dangerouslySetInnerHTML`.**
 - [ ] Commit.
@@ -337,9 +330,8 @@ The gateway is the only container with a port open on the host. `frontend` and `
 - [ ] It has no `/api` handling and no rate limiting. The gateway does both.
 
 ### Task 8.2: `frontend/Dockerfile` (multi-stage)
-- [ ] Stage 1: `FROM node:22-alpine AS build`, then `WORKDIR /app`, copy `package*.json`, `npm ci`, copy the rest, `npm run build`.
-- [ ] Stage 2: `FROM nginx:1.27-alpine`. Copy `--from=build /app/dist` to `/usr/share/nginx/html`, and `nginx.conf` to `/etc/nginx/conf.d/default.conf`.
-- [ ] Add a `.dockerignore` covering `node_modules`, `dist`, `.env`.
+- [x] Stage 1: `FROM node:24-alpine AS build`, install Bun, `bun install --frozen-lockfile`, `bun run build`. Stage 2: `nginx:1.27-alpine` with `frontend/nginx.conf` and the built `dist/`.
+- [x] Add a `.dockerignore` covering `node_modules`, `dist`, `.env`.
 
 ### Task 8.3: The gateway, `nginx/nginx.conf` (already written)
 - [ ] Read [nginx/nginx.conf](../nginx/nginx.conf). It's already in the repo. Make sure you understand each block:
@@ -391,7 +383,7 @@ Do each check against `docker compose up --build`, with no dev file. Each one is
 - [ ] **Raw:** `curl -i localhost:3000/api/v1/pastes/<id>/raw` returns `text/plain; charset=utf-8` and the exact text.
 - [ ] **XSS:** pastes of `<script>alert(1)</script>` and `<img src=x onerror=alert(1)>` show as literal text, and no alert pops up.
 - [ ] **Clipboard over plain HTTP:** open the app at `http://<your-LAN-IP>:3000`. Copy falls back to selecting the text instead of failing silently.
-- [ ] **Tests:** backend `pytest` and frontend `npm test -- --run` both pass.
+- [ ] **Tests:** backend `uv run pytest` and frontend `bun run test --run` both pass.
 
 ---
 
@@ -400,8 +392,8 @@ Do each check against `docker compose up --build`, with no dev file. Each one is
 ### Task 10.1: README
 - [ ] What it is, in one line (already there).
 - [ ] **Run it:** copy the three `.env.example` files (root, `backend/`, `frontend/`) to `.env` and set the password, then `docker compose up --build`, then open `http://localhost:3000`.
-- [ ] **Develop:** the dev compose file, `uvicorn --reload`, `npm run dev`.
-- [ ] **Test:** the backend pytest command (Phase 4.2), and `npm test` for the frontend.
+- [ ] **Develop:** the dev compose file, `uvicorn --reload`, `bun run dev`.
+- [ ] **Test:** `uv run pytest` from `backend/`, and `bun run test` for the frontend.
 - [ ] **Configuration:** the table from PROJECT-IDEA.md.
 - [ ] **API:** the three routes, with status codes.
 
@@ -420,7 +412,8 @@ Do each check against `docker compose up --build`, with no dev file. Each one is
 | Size check | `len(text)` counts characters | `len(text.encode("utf-8"))` counts bytes |
 | Size check | Putting it in a Pydantic validator | Validators can only give 422. Do it in the route for 413 |
 | Whitespace | `.strip()` the text before saving | Only *check* `strip()` for emptiness. Store the text as-is |
-| Nginx errors | `response.json()` on 413 or 429 | Those are HTML pages. Map errors by status code |
+| Nginx errors | Reading `err.response.data` on 413 or 429 | Those are HTML pages. Map errors by `err.response?.status` |
+| React Query | Default `retry: 3` on a 404 | Keeps "Loading…" up for seconds. `retry: false` is set on the `QueryClient` in `api.ts` |
 | Clipboard | Assuming `navigator.clipboard` exists | It's `undefined` on plain HTTP away from localhost. Add a fallback |
 | Line numbers | Numbers in the DOM text | CSS `::before` counters, which aren't copied |
 | Rate limit | Applying `limit_req` to all of `/api/` | Exact-match `location = /api/v1/pastes`, so only creates are limited |

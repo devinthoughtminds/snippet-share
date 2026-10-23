@@ -1,11 +1,11 @@
-FROM node:24-alpine
-
+FROM node:24-alpine AS build
+RUN npm install -g bun@1.3.14
 WORKDIR /app
-
-COPY package*.json ./
-RUN npm install
-
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 COPY . .
+RUN bun run build
 
-EXPOSE 5173
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+FROM nginx:1.27-alpine
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html

@@ -26,7 +26,17 @@ async def test_text_is_stored_byte_for_byte(client, session_maker):
     assert paste.text.encode("utf-8") == text.encode("utf-8")
 
 
-@pytest.mark.parametrize("payload", [{"text": ""}, {"text": "   \n\t"}, {}, {"text": 123}])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"text": ""},
+        {"text": "   \n\t"},
+        {},
+        {"text": 123},
+        {"text": "a\x00b"},  # Postgres text can't hold NUL
+        {"text": "a\ud800b"},  # lone surrogate, can't be encoded as UTF-8
+    ],
+)
 async def test_create_rejects_empty_or_invalid_text(client, payload):
     response = await client.post("/api/v1/pastes", json=payload)
     assert response.status_code == 422

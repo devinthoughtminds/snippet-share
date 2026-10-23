@@ -12,6 +12,13 @@ class PasteCreate(BaseModel):
     def text_not_blank(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("text must not be empty")
+        # Both would otherwise surface as a 500: Postgres rejects NUL, and the size check can't encode lone surrogates.
+        if "\x00" in v:
+            raise ValueError("text must not contain NUL characters")
+        try:
+            v.encode("utf-8")
+        except UnicodeEncodeError:
+            raise ValueError("text must be valid Unicode")
         return v  # unchanged: whitespace inside a paste is content
 
 

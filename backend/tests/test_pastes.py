@@ -1,6 +1,8 @@
 import uuid
 from datetime import datetime
 
+import pytest
+
 from app.core.config import settings
 from app.model import Paste
 
@@ -22,3 +24,9 @@ async def test_text_is_stored_byte_for_byte(client, session_maker):
     async with session_maker() as session:
         paste = await session.get(Paste, uuid.UUID(response.json()["id"]))
     assert paste.text.encode("utf-8") == text.encode("utf-8")
+
+
+@pytest.mark.parametrize("payload", [{"text": ""}, {"text": "   \n\t"}, {}, {"text": 123}])
+async def test_create_rejects_empty_or_invalid_text(client, payload):
+    response = await client.post("/api/v1/pastes", json=payload)
+    assert response.status_code == 422

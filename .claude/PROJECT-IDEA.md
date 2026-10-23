@@ -10,23 +10,21 @@ snippet-share is a public, self-hosted pastebin. Anyone can paste text, get a li
 
 | Layer | Choice |
 |---|---|
-| Frontend | React single-page app built with Vite, served by Nginx |
+| Gateway | Nginx: the single entry point, routing to the frontend and backend |
+| Frontend | React single-page app built with Vite, static files served by its own Nginx container |
 | Backend | FastAPI on Uvicorn, Pydantic validation, SQLAlchemy 2 (async) with asyncpg |
 | Database | PostgreSQL 16 |
 | Migrations | Alembic |
-| Runtime | Docker Compose: `db`, `backend`, `frontend` |
+| Runtime | Docker Compose: `db`, `backend`, `frontend`, `nginx` |
 | Tests | pytest with httpx (backend); Vitest with React Testing Library (frontend) |
 
 ```
-Browser ──► frontend (Nginx :3000)
-              ├─ /           → React app
-              └─ /api/*      → rate limit, size limit → backend:8000
-                                                          │
-                                                          ▼
-                                             db (Postgres :5432, internal only)
+Browser ──► nginx gateway (:3000 on host)
+              ├─ /api/*  → rate limit, size limit → backend:8000 ──► db (Postgres :5432)
+              └─ /*      → frontend:80 (React static files)
 ```
 
-Nginx serves the app and passes `/api` requests to the backend, so the browser only ever talks to one address. That means no CORS setup is needed. Only port 3000 is open on the host machine. Nginx also enforces the rate limit and size limit, so abusive requests never reach the backend.
+The `nginx` gateway is the only service with a port open on the host (3000). It sends `/api/*` to the backend and everything else to the frontend, so the browser only ever talks to one address and no CORS setup is needed. The gateway also enforces the rate limit and size limit, so abusive requests never reach the backend. `frontend`, `backend` and `db` are only reachable inside the Compose network. The gateway's config is in [nginx/nginx.conf](../nginx/nginx.conf).
 
 ## Data model
 
@@ -133,7 +131,8 @@ The Postgres username and password come from a `.env` file, which isn't committe
 
 - **`db`**: `postgres:16-alpine`, with a named volume `pgdata:/var/lib/postgresql/data` and a `pg_isready` healthcheck. Its port isn't published to the host.
 - **`backend`**: built from `backend/Dockerfile`. It waits until `db` is healthy (`depends_on: condition: service_healthy`), runs `alembic upgrade head`, then starts Uvicorn.
-- **`frontend`**: a multi-stage build. Vite builds the app, then Nginx serves it, proxies `/api` with the size and rate limits, and publishes `3000:80`.
+- **`frontend`**: a multi-stage build. Vite builds the app, then a small Nginx serves the static files, with `/view/:id` falling back to `index.html`. No published port.
+- **`nginx`**: the gateway, `nginx:1.27-alpine` with `nginx/nginx.conf` mounted. It routes `/api/*` to `backend:8000` and `/*` to `frontend:80`, applies the rate limit and the 2 MB body cap, and publishes `3000:80`.
 
 ## Out of scope for v1
 

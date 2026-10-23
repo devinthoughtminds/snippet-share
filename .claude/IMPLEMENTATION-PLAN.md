@@ -17,9 +17,12 @@ This plan implements [PROJECT-IDEA.md](PROJECT-IDEA.md). Work through the phases
 snippet-share/
 ├── docker-compose.yml
 ├── docker-compose.dev.yml      # dev only: publishes db 5432 + backend 8000
-├── .env.example
+├── .env.example                # Compose: Postgres credentials, PUBLIC_BASE_URL
 ├── db/init/01-test-db.sql      # creates the snippet_test database
+├── nginx/
+│   └── nginx.conf              # gateway: /api → backend, / → frontend (already written)
 ├── backend/
+│   ├── .env.example            # backend outside Docker: DB URLs, size limit
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   ├── pytest.ini
@@ -36,8 +39,9 @@ snippet-share/
 │       ├── conftest.py
 │       └── test_pastes.py
 └── frontend/
+    ├── .env.example            # Vite: size limit, dev proxy target
     ├── Dockerfile
-    ├── nginx.conf
+    ├── nginx.conf              # static files + SPA fallback only
     ├── package.json
     ├── vite.config.js
     ├── index.html
@@ -61,16 +65,17 @@ snippet-share/
 - [ ] Get push access to `devinthoughtminds/snippet-share` (see the failed push earlier).
 
 ### Task 0.2: Repo skeleton
-- [ ] Create a `.gitignore` covering `.env`, `__pycache__/`, `.venv/`, `node_modules/`, `dist/`, `.pytest_cache/`, and `.claude/settings.local.json`.
-- [ ] Create `.env.example`:
-  ```
-  POSTGRES_USER=snippet
-  POSTGRES_PASSWORD=change-me
-  POSTGRES_DB=snippet
-  PUBLIC_BASE_URL=http://localhost:3000
-  MAX_PASTE_BYTES=1048576
-  ```
-- [ ] Copy it to `.env` (not committed).
+- [x] Create a `.gitignore` covering `.env`, `__pycache__/`, `.venv/`, `node_modules/`, `dist/`, `.pytest_cache/`, and `.claude/settings.local.json`.
+- [x] Create the env files. Each `.env.example` is committed, and its `.env` copy is ignored:
+
+  | File | Read by | Holds |
+  |---|---|---|
+  | `.env` | Docker Compose | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `PUBLIC_BASE_URL` (`:3000`) |
+  | `backend/.env` | the backend outside Docker (uvicorn, pytest, alembic, run from `backend/`) | `DATABASE_URL`, `TEST_DATABASE_URL` (both `localhost:5432`), `PUBLIC_BASE_URL` (`:5173`), `MAX_PASTE_BYTES` |
+  | `frontend/.env` | Vite (dev and build) | `VITE_MAX_PASTE_BYTES`, `API_PROXY_TARGET` |
+
+- [x] Copy each to `.env`. The local `.env` and `backend/.env` share one generated database password.
+- [ ] **New developers:** copy all three `.env.example` files to `.env`, and put the same password in `.env` and both URLs in `backend/.env`.
 - [ ] Commit.
 
 ---
@@ -94,10 +99,10 @@ snippet-share/
 ### Task 1.2: Backend project
 - [ ] Create a virtual environment: `python -m venv backend/.venv`, then activate it.
 - [ ] `backend/requirements.txt`: `fastapi`, `uvicorn[standard]`, `sqlalchemy[asyncio]`, `asyncpg`, `alembic`, `pydantic-settings`, `pytest`, `pytest-asyncio`, `httpx`. Pin the versions you install (`pip freeze`).
-- [ ] `app/config.py`: a `Settings(BaseSettings)` with `database_url`, `public_base_url`, and `max_paste_bytes: int = 1_048_576`, plus a single module-level `settings = Settings()`.
+- [ ] `app/config.py`: a `Settings(BaseSettings)` with `model_config = SettingsConfigDict(env_file=".env")`, fields `database_url`, `public_base_url`, and `max_paste_bytes: int = 1_048_576`, plus a single module-level `settings = Settings()`. Real environment variables take priority over `.env`, which is how Compose overrides the values in Docker. A missing `.env` is ignored.
 - [ ] `app/db.py`: `engine = create_async_engine(settings.database_url)`, `SessionLocal = async_sessionmaker(engine, expire_on_commit=False)`, and an `async def get_session()` dependency that yields a session.
-- [ ] `app/main.py`: `app = FastAPI(title="snippet-share")`.
-- [ ] **Check:** `uvicorn app.main:app --reload` (from `backend/`) starts, and `http://localhost:8000/docs` loads.
+- [ ] `app/main.py`: `app = FastAPI(title="snippet-share", docs_url="/api/docs", openapi_url="/api/openapi.json")`. The docs live under `/api` so the gateway routes them to the backend.
+- [ ] **Check:** `uvicorn app.main:app --reload` (from `backend/`) starts, and `http://localhost:8000/api/docs` loads.
 - [ ] Commit.
 
 ### Task 1.3: Paste model and first migration
@@ -114,7 +119,7 @@ snippet-share/
   - A session-scoped fixture that creates an engine and runs `Base.metadata.create_all`. Migrations are for the real database; create_all is enough for tests.
   - A fixture that runs `TRUNCATE pastes` before each test.
   - A `client` fixture: `httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test")`, with `app.dependency_overrides[get_session]` pointing at the test engine.
-- [ ] A smoke test: `GET /docs` returns 200.
+- [ ] A smoke test: `GET /api/docs` returns 200.
 - [ ] **Check:** `pytest` passes.
 - [ ] Commit.
 
@@ -170,7 +175,7 @@ snippet-share/
 
 ### Task 3.3: Clean up the API docs
 - [ ] Set `response_model` and `responses={404: ..., 413: ..., 422: ...}` on each route so `/docs` shows the real behaviour.
-- [ ] **Check:** open `/docs` and try all three routes by hand.
+- [ ] **Check:** open `/api/docs` and try all three routes by hand.
 - [ ] Commit.
 
 ---
@@ -181,14 +186,23 @@ snippet-share/
 - [ ] `backend/Dockerfile`: start `FROM python:3.12-slim`, copy `requirements.txt` first and `pip install --no-cache-dir`, then copy the code.
 - [ ] Startup command: `sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"`.
 - [ ] Run as a non-root user (`useradd`, then `USER app`).
-- [ ] Add a `.dockerignore` covering `.venv`, `__pycache__`, `tests/.pytest_cache`.
+- [ ] Add a `.dockerignore` covering `.env`, `.venv`, `__pycache__`, `tests/.pytest_cache`. Leave `.env` out of the image: secrets must never be baked into it.
 
 ### Task 4.2: Add the backend service to Compose
-- [ ] `backend` service: `build: ./backend`, `env_file: .env`, and an `environment:` block that builds `DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}`.
+- [ ] `backend` service. `env_file` brings in `MAX_PASTE_BYTES`. `environment:` replaces the localhost values with Docker ones, and wins over `env_file`. `${...}` values come from the root `.env`:
+  ```yaml
+    backend:
+      build: ./backend
+      env_file: ./backend/.env
+      environment:
+        DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+        TEST_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/snippet_test
+        PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+  ```
 - [ ] `depends_on: { db: { condition: service_healthy } }`.
 - [ ] No `ports:` in the main file. In `docker-compose.dev.yml`, publish `127.0.0.1:8000:8000`.
 - [ ] **Check:** `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build db backend`. The logs show the migration running, then Uvicorn starting. Then `curl -X POST localhost:8000/api/v1/pastes -H "content-type: application/json" -d "{\"text\":\"hi\"}"` returns 201.
-- [ ] **Check:** `docker compose run --rm -e TEST_DATABASE_URL=postgresql+asyncpg://snippet:<password>@db:5432/snippet_test backend pytest` passes.
+- [ ] **Check:** `docker compose run --rm backend pytest` passes. `TEST_DATABASE_URL` already points at `db` inside the container.
 - [ ] Commit.
 
 ---
@@ -201,7 +215,7 @@ snippet-share/
 - [ ] `npm install -D vitest @testing-library/react @testing-library/user-event @testing-library/jest-dom jsdom`
 - [ ] `vite.config.js`:
   - `test: { environment: "jsdom", setupFiles: "./src/setupTests.js" }`
-  - `server: { proxy: { "/api": "http://localhost:8000" } }`, so dev builds call the backend with the same paths as production.
+  - `server: { proxy: { "/api": env.API_PROXY_TARGET } }`, where `env = loadEnv(mode, process.cwd(), "")` (wrap the config as `defineConfig(({ mode }) => ...)`). Dev builds then call the backend with the same paths as production.
 - [ ] Delete the Vite demo files (the logo, the counter, `App.css`).
 - [ ] Add a `"test": "vitest"` script.
 - [ ] Commit.
@@ -234,6 +248,7 @@ snippet-share/
   - A `<textarea autoFocus spellCheck={false}>` with a monospace font, filling the page.
   - Words: `text.trim().split(/\s+/).filter(Boolean).length`
   - Bytes: `new TextEncoder().encode(text).length`
+  - Limit: `Number(import.meta.env.VITE_MAX_PASTE_BYTES ?? 1048576)`. The fallback matters: the Docker build has no `.env` (it's in `.dockerignore`).
   - Give the text area a label (`aria-label="Paste text"`) for screen readers.
 - [ ] Commit.
 
@@ -295,29 +310,23 @@ snippet-share/
 
 ---
 
-## Phase 8: Nginx and the frontend container
+## Phase 8: Frontend container and Nginx gateway
 
-### Task 8.1: `frontend/nginx.conf`
+```
+Browser ──► nginx (gateway, :3000 on host)
+              ├─ = /api/v1/pastes  → rate limit + 2 MB cap → backend:8000
+              ├─ /api/*            → backend:8000
+              └─ /*                → frontend:80 (static files, SPA fallback)
+```
+
+The gateway is the only container with a port open on the host. `frontend` and `backend` are reachable only inside the Compose network.
+
+### Task 8.1: `frontend/nginx.conf` (static files only)
 - [ ] Write it:
   ```nginx
-  limit_req_zone $binary_remote_addr zone=create:10m rate=10r/m;
-
   server {
       listen 80;
       root /usr/share/nginx/html;
-
-      # Create: rate limited, 2 MB body cap (backend enforces the 1 MB text limit)
-      location = /api/v1/pastes {
-          limit_req zone=create burst=5 nodelay;
-          limit_req_status 429;
-          client_max_body_size 2m;
-          proxy_pass http://backend:8000;
-      }
-
-      # Read and raw: no rate limit
-      location /api/ {
-          proxy_pass http://backend:8000;
-      }
 
       # React routes (/view/:id) fall back to index.html
       location / {
@@ -325,17 +334,42 @@ snippet-share/
       }
   }
   ```
-- [ ] **Why it works:** `location = /api/v1/pastes` is an exact match. The only route at that exact path is `POST`, so only creates are rate limited. Reads go to `/api/v1/pastes/{id}`, which the exact match doesn't cover.
-- [ ] **Behind a load balancer or Cloudflare:** add `set_real_ip_from <proxy range>;` and `real_ip_header X-Forwarded-For;`. Otherwise every user shares one IP address and one rate limit. Skip this for local use.
+- [ ] It has no `/api` handling and no rate limiting. The gateway does both.
 
 ### Task 8.2: `frontend/Dockerfile` (multi-stage)
-- [ ] Stage 1: `FROM node:22-alpine AS build`, then `npm ci`, then `npm run build`.
-- [ ] Stage 2: `FROM nginx:alpine`. Copy `dist/` to `/usr/share/nginx/html`, and `nginx.conf` to `/etc/nginx/conf.d/default.conf`.
-- [ ] Add a `.dockerignore` covering `node_modules`, `dist`.
+- [ ] Stage 1: `FROM node:22-alpine AS build`, then `WORKDIR /app`, copy `package*.json`, `npm ci`, copy the rest, `npm run build`.
+- [ ] Stage 2: `FROM nginx:1.27-alpine`. Copy `--from=build /app/dist` to `/usr/share/nginx/html`, and `nginx.conf` to `/etc/nginx/conf.d/default.conf`.
+- [ ] Add a `.dockerignore` covering `node_modules`, `dist`, `.env`.
 
-### Task 8.3: Add the frontend service to Compose
-- [ ] `frontend` service: `build: ./frontend`, `ports: ["3000:80"]`, `depends_on: [backend]`.
-- [ ] **Check:** `docker compose up --build` (without the dev file). Open `http://localhost:3000`, create a paste, and open its link.
+### Task 8.3: The gateway, `nginx/nginx.conf` (already written)
+- [ ] Read [nginx/nginx.conf](../nginx/nginx.conf). It's already in the repo. Make sure you understand each block:
+  - `limit_req_zone`: tracks how often each client IP creates pastes (10 per minute).
+  - `location = /api/v1/pastes`: an exact match. The only route at that exact path is `POST`, so only creates are rate limited, with a burst of 5 and a 429 response when exceeded. Reads go to `/api/v1/pastes/{id}`, which the exact match doesn't cover. `client_max_body_size 2m` caps the request body here.
+  - `location /api/`: reads, raw, and `/api/docs` go to the backend without a rate limit.
+  - `location /`: everything else goes to the frontend container.
+  - `proxy_set_header`: passes the client's real IP and the original host to the backend.
+- [ ] **Behind a load balancer or Cloudflare:** add `set_real_ip_from <proxy range>;` and `real_ip_header X-Forwarded-For;` to the gateway. Otherwise every user shares one IP address and one rate limit. Skip this for local use.
+
+### Task 8.4: Add `frontend` and `nginx` to Compose
+- [ ] Add to `docker-compose.yml`:
+  ```yaml
+    frontend:
+      build: ./frontend
+      # no ports: reached only through the gateway
+
+    nginx:
+      image: nginx:1.27-alpine
+      ports:
+        - "3000:80"
+      volumes:
+        - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      depends_on:
+        - backend
+        - frontend
+  ```
+- [ ] **Check the config:** `docker compose run --rm nginx nginx -t` prints `syntax is ok`.
+- [ ] **Check:** `docker compose up --build` (without the dev file). Open `http://localhost:3000`, create a paste, and open its link. Also check that `http://localhost:3000/api/docs` loads the API docs.
+- [ ] **Check isolation:** `curl localhost:8000` fails (connection refused). The backend isn't reachable from the host without the dev file.
 - [ ] Commit.
 
 ---
@@ -365,7 +399,7 @@ Do each check against `docker compose up --build`, with no dev file. Each one is
 
 ### Task 10.1: README
 - [ ] What it is, in one line (already there).
-- [ ] **Run it:** copy `.env.example` to `.env`, then `docker compose up --build`, then open `http://localhost:3000`.
+- [ ] **Run it:** copy the three `.env.example` files (root, `backend/`, `frontend/`) to `.env` and set the password, then `docker compose up --build`, then open `http://localhost:3000`.
 - [ ] **Develop:** the dev compose file, `uvicorn --reload`, `npm run dev`.
 - [ ] **Test:** the backend pytest command (Phase 4.2), and `npm test` for the frontend.
 - [ ] **Configuration:** the table from PROJECT-IDEA.md.
@@ -373,7 +407,7 @@ Do each check against `docker compose up --build`, with no dev file. Each one is
 
 ### Task 10.2: Update CLAUDE.md
 - [ ] Replace its "Current state" section with the real commands (build, test, run a single test: `pytest tests/test_pastes.py::test_name` and `npx vitest run -t "name"`).
-- [ ] Add a short architecture note: Nginx sits in front, the rate limit and body cap live in `nginx.conf`, and the backend enforces the 1 MB text limit.
+- [ ] Add a short architecture note: the `nginx` gateway is the only service open to the host, the rate limit and body cap live in `nginx/nginx.conf`, and the backend enforces the 1 MB text limit.
 - [ ] Commit, then push.
 
 ---
@@ -390,5 +424,7 @@ Do each check against `docker compose up --build`, with no dev file. Each one is
 | Clipboard | Assuming `navigator.clipboard` exists | It's `undefined` on plain HTTP away from localhost. Add a fallback |
 | Line numbers | Numbers in the DOM text | CSS `::before` counters, which aren't copied |
 | Rate limit | Applying `limit_req` to all of `/api/` | Exact-match `location = /api/v1/pastes`, so only creates are limited |
+| Gateway | Gateway starts before `backend`/`frontend` exist and fails with "host not found in upstream" | `depends_on` both. After renaming a service, update the `upstream` blocks too |
+| API docs | Leaving FastAPI's docs at `/docs`, where the gateway sends them to the frontend | `docs_url="/api/docs"`, `openapi_url="/api/openapi.json"` |
 | Postgres init | Adding `db/init` after the volume exists | Init scripts only run on an empty volume. `down -v` once |
 | Async tests | Engine and tests on different event loops | Session-scoped loop in `pytest.ini` |

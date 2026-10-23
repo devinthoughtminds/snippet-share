@@ -1,4 +1,14 @@
 from fastapi import FastAPI
 
-# Docs live under /api so the nginx gateway routes them to the backend.
-app = FastAPI(title="snippet-share", docs_url="/api/docs", openapi_url="/api/openapi.json")
+# ... router imports ...
+from app.core.config import settings
+from app.routes.pastes import router as pastes_router
+
+# ... create app ...
+app = FastAPI(
+    title=settings.APP_NAME,   # uses APP_NAME from env
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json"
+)
+
+app.include_router(paste)

@@ -30,13 +30,22 @@ snippet-share/
 │   ├── alembic/                # env.py + versions/
 │   ├── app/
 │   │   ├── main.py             # FastAPI app, includes the router
-│   │   ├── config.py           # settings from env vars
-│   │   ├── db.py               # engine, session dependency
-│   │   ├── models.py           # Paste table
-│   │   ├── schemas.py          # request/response models
-│   │   └── pastes.py           # the three routes
+│   │   ├── core/
+│   │   │   ├── config.py       # settings from env vars
+│   │   │   ├── database.py     # engine, async_session_maker
+│   │   │   └── dependencies.py # get_db session dependency
+│   │   ├── model/
+│   │   │   ├── __init__.py     # imports every model, so Base.metadata sees all tables
+│   │   │   ├── base.py         # DeclarativeBase
+│   │   │   └── paste.py        # Paste table
+│   │   ├── schema/
+│   │   │   └── paste.py        # request/response models
+│   │   └── api/
+│   │       └── paste.py        # the three routes
 │   └── tests/
 │       ├── conftest.py
+│       ├── test_smoke.py       # /api/docs
+│       ├── test_foundation.py  # settings, get_db, Paste model
 │       └── test_pastes.py
 └── frontend/
     ├── .env.example            # Vite: size limit, dev proxy target
@@ -92,29 +101,32 @@ snippet-share/
 
 ### Task 1.2: Backend project
 - [x] Dependencies are in `pyproject.toml`, and `uv.lock` pins them. Runtime: `fastapi`, `uvicorn[standard]`, `sqlalchemy[asyncio]`, `asyncpg`, `alembic`, `pydantic-settings`. Dev group: `pytest`, `pytest-asyncio`, `httpx`. Add more with `uv add <pkg>` (or `uv add --dev <pkg>`); never edit `uv.lock` by hand. Run commands with `uv run ...` from `backend/`.
-- [ ] `app/config.py`: a `Settings(BaseSettings)` with `model_config = SettingsConfigDict(env_file=".env")`, fields `database_url`, `public_base_url`, and `max_paste_bytes: int = 1_048_576`, plus a single module-level `settings = Settings()`. Real environment variables take priority over `.env`, which is how Compose overrides the values in Docker. A missing `.env` is ignored.
-- [ ] `app/db.py`: `engine = create_async_engine(settings.database_url)`, `SessionLocal = async_sessionmaker(engine, expire_on_commit=False)`, and an `async def get_session()` dependency that yields a session.
+- [x] `app/core/config.py`: a `Settings(BaseSettings)` with `model_config = SettingsConfigDict(env_file=".env", extra="ignore")`, fields `database_url`, `public_base_url`, `debug`, and `max_paste_bytes`, plus a single module-level `settings = Settings()`. Real environment variables take priority over `.env`, which is how Compose overrides the values in Docker. A missing `.env` is ignored. `extra="ignore"` is needed because `backend/.env` also holds `TEST_DATABASE_URL`.
+  - [ ] Give `max_paste_bytes` its default, `= 1_048_576`.
+- [x] `app/core/database.py`: `engine = create_async_engine(settings.database_url, echo=settings.debug)` and `async_session_maker = async_sessionmaker(engine, expire_on_commit=False)`. SQL logging stays off outside debug, because it would write paste text to the logs.
+- [x] `app/core/dependencies.py`: an `async def get_db()` dependency that yields a session.
 - [x] `app/main.py`: `app = FastAPI(title="snippet-share", docs_url="/api/docs", openapi_url="/api/openapi.json")`. The docs live under `/api` so the gateway routes them to the backend.
 - [ ] **Check:** `uv run uvicorn app.main:app --reload` (from `backend/`) starts, and `http://localhost:8000/api/docs` loads.
 - [ ] Commit.
 
 ### Task 1.3: Paste model and first migration
-- [ ] `app/models.py`: a `Paste` model with `id: UUID` (primary key, `default=uuid.uuid4`), `text: Text` (not null), and `created_at: TIMESTAMP(timezone=True)` (not null, `server_default=func.now()`).
-- [ ] `alembic init -t async alembic`. In `alembic/env.py`, set `target_metadata = Base.metadata` and read the URL from `settings.database_url`.
+- [x] `app/model/base.py`: `Base(DeclarativeBase)`. `app/model/paste.py`: a `Paste` model with `id: UUID` (primary key, `default=uuid.uuid4`), `text: Text` (not null), and `created_at: TIMESTAMP(timezone=True)` (not null, `server_default=func.now()`).
+- [x] `app/model/__init__.py` imports `Base` and every model. **When you add a model, import it here**, or autogenerate won't see its table and will write a migration that drops it.
+- [x] `alembic init -t async alembic`. In `alembic/env.py`, `from app.model import Base`, set `target_metadata = Base.metadata`, and read the URL from `settings.database_url`.
 - [ ] `alembic revision --autogenerate -m "create pastes"`. **Read the generated file** and check it creates exactly the three columns.
 - [ ] **Check:** `alembic upgrade head`, then `\d pastes` in `psql` shows the table.
 - [ ] Commit.
 
 ### Task 1.4: Test harness
-- [ ] `pytest.ini`: `asyncio_mode = auto`, plus `asyncio_default_fixture_loop_scope = session`. The engine and the tests must share one event loop; mismatched loops are the most common asyncpg test failure.
-- [ ] `tests/conftest.py`:
-  - Set the URL to the `snippet_test` database, from a `TEST_DATABASE_URL` env var.
-  - A session-scoped fixture that creates an engine and runs `Base.metadata.create_all`. Migrations are for the real database; create_all is enough for tests.
+- [x] `pytest.ini`: `pythonpath = .`, `asyncio_mode = auto`, plus `asyncio_default_fixture_loop_scope = session` and `asyncio_default_test_loop_scope = session`. The engine and the tests must share one event loop; mismatched loops are the most common asyncpg test failure.
+- [x] `tests/conftest.py`:
+  - Load `backend/.env` with `load_dotenv()` and take the URL from `TEST_DATABASE_URL`. Refuse to run unless its database name ends in `_test`, because the fixtures drop and truncate tables.
+  - A session-scoped fixture that creates an engine and runs `Base.metadata.drop_all` then `create_all`, so the test schema always matches the models. Migrations are for the real database; create_all is enough for tests.
   - A fixture that runs `TRUNCATE pastes` before each test.
-  - A `client` fixture: `httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test")`, with `app.dependency_overrides[get_session]` pointing at the test engine.
-- [ ] A smoke test: `GET /api/docs` returns 200.
-- [ ] **Check:** with the dev `db` running, `uv run pytest` (from `backend/`) passes. It reads `TEST_DATABASE_URL` from `backend/.env`.
-- [ ] Commit.
+  - A `client` fixture: `httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test")`, with `app.dependency_overrides[get_db]` pointing at the test engine.
+- [x] A smoke test (`test_smoke.py`): `GET /api/docs` returns 200. `test_foundation.py` covers settings, `get_db`, and the `Paste` model.
+- [x] **Check:** with the dev `db` running, `uv run pytest` (from `backend/`) passes. It reads `TEST_DATABASE_URL` from `backend/.env`.
+- [x] Commit.
 
 ---
 
@@ -123,8 +135,8 @@ snippet-share/
 ### Task 2.1: The happy path
 - [ ] **Write the test first** (`test_pastes.py`). `test_create_returns_201_with_id_and_share_url` posts `{"text": "hello\n  world"}` and checks for status 201, a body with a valid UUID `id`, `share_url == f"{PUBLIC_BASE_URL}/view/{id}"`, and an ISO `created_at`.
 - [ ] Run it and **watch it fail** (404, because there's no route yet).
-- [ ] `app/schemas.py`: `PasteCreate(text: str)` and `PasteCreated(id: UUID, share_url: str, created_at: datetime)`.
-- [ ] `app/pastes.py`: `router = APIRouter(prefix="/api/v1/pastes")` with a `POST ""` route (`status_code=201`) that inserts the row, commits, and returns `PasteCreated`. Include the router in `main.py`.
+- [ ] `app/schema/paste.py`: `PasteCreate(text: str)` and `PasteCreated(id: UUID, share_url: str, created_at: datetime)`.
+- [ ] `app/api/paste.py`: `router = APIRouter(prefix="/api/v1/pastes")` with a `POST ""` route (`status_code=201`) that takes a session from `Depends(get_db)`, inserts the row, commits, and returns `PasteCreated`. Include the router in `main.py`.
 - [ ] Run it and watch it pass. Commit.
 
 ### Task 2.2: The text is stored exactly

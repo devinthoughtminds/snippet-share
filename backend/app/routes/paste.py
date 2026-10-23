@@ -27,7 +27,12 @@ async def get_paste_or_404(paste_id: str, session: AsyncSession) -> Paste:
 @router.post("", status_code=201, response_model=PasteCreated)
 async def create_paste(body: PasteCreate, session: AsyncSession = Depends(get_db)):
     # Here, not in the schema: a validator can only produce 422. Measure bytes, not characters.
-    if len(body.text.encode("utf-8")) > settings.max_paste_bytes:
+    try:
+        size = len(body.text.encode("utf-8"))
+    except UnicodeEncodeError:
+        # Lone surrogate. Not a validator error: FastAPI's 422 body echoes the input and can't encode it either.
+        raise HTTPException(422, "text must be valid Unicode")
+    if size > settings.max_paste_bytes:
         raise HTTPException(413, "Paste exceeds 1 MB")
     paste = await paste_service.create_paste(session, body.text)
     return PasteCreated(

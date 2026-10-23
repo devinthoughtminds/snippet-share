@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime
 
@@ -38,7 +39,9 @@ async def test_text_is_stored_byte_for_byte(client, session_maker):
     ],
 )
 async def test_create_rejects_empty_or_invalid_text(client, payload):
-    response = await client.post("/api/v1/pastes", json=payload)
+    # json.dumps escapes non-ASCII (\ud800), as browsers do; httpx's json= can't send a lone surrogate.
+    body = json.dumps(payload)
+    response = await client.post("/api/v1/pastes", content=body, headers={"content-type": "application/json"})
     assert response.status_code == 422
 
 

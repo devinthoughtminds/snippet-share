@@ -84,8 +84,8 @@ This returns the text alone as `text/plain; charset=utf-8`, with the same `404` 
 
 ## Size limit (1 MB)
 
-- **Nginx:** `client_max_body_size 1m`. Oversized requests are rejected before they reach the backend.
-- **Backend:** the app checks the size again (`MAX_PASTE_BYTES`) in case it's run without Nginx.
+- **Nginx:** `client_max_body_size 2m` stops very large requests before they reach the backend. It's above 1 MB because JSON escaping makes the request bigger than the text.
+- **Backend:** enforces the real limit: the text's UTF-8 size must be at most `MAX_PASTE_BYTES` (1 MB), otherwise it returns `413`.
 - **Create view:** checks the size before uploading, so the user sees the error without waiting for the upload.
 
 1 MB is small enough to display in full, with line numbers, without slowing the browser down. So every paste is shown inline, and there's no separate view for large pastes.
@@ -122,7 +122,7 @@ The app is open to everyone, so v1 includes:
 | `DATABASE_URL` | backend | `postgresql+asyncpg://snippet:snippet@db:5432/snippet` |
 | `PUBLIC_BASE_URL` | backend | `http://localhost:3000` |
 | `MAX_PASTE_BYTES` | backend | `1048576` (1 MB) |
-| `client_max_body_size` | Nginx | `1m` (must match `MAX_PASTE_BYTES`) |
+| `client_max_body_size` | Nginx | `2m`. This is the whole JSON body, which is bigger than the text because escaping (`\n`, `\"`) adds bytes. The backend enforces the real 1 MB limit on the text. |
 | `limit_req` rate | Nginx | `10r/m`, burst `5` |
 
 The Postgres username and password come from a `.env` file, which isn't committed. A `.env.example` file is committed instead, showing which values are needed.

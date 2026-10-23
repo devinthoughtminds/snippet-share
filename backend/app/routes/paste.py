@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -47,3 +48,10 @@ async def create_paste(body: PasteCreate, session: AsyncSession = Depends(get_db
 async def read_paste(paste_id: str, session: AsyncSession = Depends(get_db)):
     paste = await get_paste_or_404(paste_id, session)
     return PasteRead(id=paste.id, text=paste.text, created_at=paste.created_at)
+
+
+@router.get("/{paste_id}/raw", response_class=PlainTextResponse)
+async def read_paste_raw(paste_id: str, session: AsyncSession = Depends(get_db)):
+    paste = await get_paste_or_404(paste_id, session)
+    # nosniff: browsers must never reinterpret a paste as HTML.
+    return PlainTextResponse(paste.text, headers={"X-Content-Type-Options": "nosniff"})

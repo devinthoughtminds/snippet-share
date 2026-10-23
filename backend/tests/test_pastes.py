@@ -84,3 +84,27 @@ async def test_get_unknown_id_returns_404(client):
 async def test_get_malformed_id_returns_404_not_422(client, bad_id):
     response = await client.get(f"/api/v1/pastes/{bad_id}")
     assert response.status_code == 404
+
+
+async def test_raw_returns_exact_text_as_plain_text(client):
+    text = "\tindented\r\n    spaces 🎉\nlast line\n"
+    created = (await client.post("/api/v1/pastes", json={"text": text})).json()
+
+    response = await client.get(f"/api/v1/pastes/{created['id']}/raw")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/plain; charset=utf-8"
+    assert response.content == text.encode("utf-8")
+
+
+@pytest.mark.parametrize("bad_id", [str(uuid.uuid4()), "not-a-uuid"])
+async def test_raw_unknown_or_malformed_id_returns_404(client, bad_id):
+    response = await client.get(f"/api/v1/pastes/{bad_id}/raw")
+    assert response.status_code == 404
+
+
+async def test_raw_never_serves_html(client):
+    created = (await client.post("/api/v1/pastes", json={"text": "<script>alert(1)</script>"})).json()
+    response = await client.get(f"/api/v1/pastes/{created['id']}/raw")
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "nosniff" in response.headers.get("x-content-type-options", "")

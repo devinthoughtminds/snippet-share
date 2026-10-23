@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 import babel from '@rolldown/plugin-babel'
 import { defineConfig, loadEnv } from 'vite'
@@ -14,5 +15,7 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: { '/api': env.API_PROXY_TARGET ?? 'http://localhost:8000' },
     },
+    // e2e/ holds Playwright specs; Vitest would otherwise pick up its *.spec.ts files.
+    test: { environment: 'jsdom', setupFiles: './test/setupTests.ts', exclude: ['e2e/**', 'node_modules/**'] },
   }
 })

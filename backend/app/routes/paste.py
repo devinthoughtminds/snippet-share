@@ -12,6 +12,9 @@ from app.services import paste as paste_service
 
 router = APIRouter(prefix="/api/v1/pastes", tags=["pastes"])
 
+# Documented in /api/docs; FastAPI adds its own 422 to every route with parameters.
+NOT_FOUND = {404: {"description": "No paste with this id (malformed ids included)"}}
+
 
 async def get_paste_or_404(paste_id: str, session: AsyncSession) -> Paste:
     # A malformed id is just a paste that doesn't exist: 404, not 422.
@@ -25,7 +28,15 @@ async def get_paste_or_404(paste_id: str, session: AsyncSession) -> Paste:
     return paste
 
 
-@router.post("", status_code=201, response_model=PasteCreated)
+@router.post(
+    "",
+    status_code=201,
+    response_model=PasteCreated,
+    responses={
+        413: {"description": "Text is over MAX_PASTE_BYTES (UTF-8 bytes)"},
+        422: {"description": "Text missing, empty, whitespace only, or not valid Unicode"},
+    },
+)
 async def create_paste(body: PasteCreate, session: AsyncSession = Depends(get_db)):
     # Here, not in the schema: a validator can only produce 422. Measure bytes, not characters.
     try:
@@ -44,13 +55,13 @@ async def create_paste(body: PasteCreate, session: AsyncSession = Depends(get_db
 
 
 # paste_id is a str on purpose, so FastAPI doesn't answer malformed ids with its own 422.
-@router.get("/{paste_id}", response_model=PasteRead)
+@router.get("/{paste_id}", response_model=PasteRead, responses=NOT_FOUND)
 async def read_paste(paste_id: str, session: AsyncSession = Depends(get_db)):
     paste = await get_paste_or_404(paste_id, session)
     return PasteRead(id=paste.id, text=paste.text, created_at=paste.created_at)
 
 
-@router.get("/{paste_id}/raw", response_class=PlainTextResponse)
+@router.get("/{paste_id}/raw", response_class=PlainTextResponse, responses=NOT_FOUND)
 async def read_paste_raw(paste_id: str, session: AsyncSession = Depends(get_db)):
     paste = await get_paste_or_404(paste_id, session)
     # nosniff: browsers must never reinterpret a paste as HTML.

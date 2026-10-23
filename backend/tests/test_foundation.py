@@ -48,3 +48,9 @@ async def test_paste_text_is_required(session_maker):
         session.add(Paste(text=None))
         with pytest.raises(IntegrityError):
             await session.commit()
+
+
+def test_max_paste_bytes_defaults_to_1_mb(monkeypatch):
+    monkeypatch.delenv("MAX_PASTE_BYTES", raising=False)
+    settings = Settings(_env_file=None, database_url="postgresql+asyncpg://u:p@h/db", public_base_url="http://x")
+    assert settings.max_paste_bytes == 1_048_576

@@ -38,9 +38,11 @@ snippet-share/
 │   │   │   ├── __init__.py     # imports every model, so Base.metadata sees all tables
 │   │   │   ├── base.py         # DeclarativeBase
 │   │   │   └── paste.py        # Paste table
-│   │   ├── schema/
+│   │   ├── schemas/
 │   │   │   └── paste.py        # request/response models
-│   │   └── api/
+│   │   ├── services/
+│   │   │   └── paste.py        # database access for pastes
+│   │   └── routes/
 │   │       └── paste.py        # the three routes
 │   └── tests/
 │       ├── conftest.py
@@ -133,42 +135,43 @@ snippet-share/
 ## Phase 2: Create a paste (`POST /api/v1/pastes`)
 
 ### Task 2.1: The happy path
-- [ ] **Write the test first** (`test_pastes.py`). `test_create_returns_201_with_id_and_share_url` posts `{"text": "hello\n  world"}` and checks for status 201, a body with a valid UUID `id`, `share_url == f"{PUBLIC_BASE_URL}/view/{id}"`, and an ISO `created_at`.
-- [ ] Run it and **watch it fail** (404, because there's no route yet).
-- [ ] `app/schema/paste.py`: `PasteCreate(text: str)` and `PasteCreated(id: UUID, share_url: str, created_at: datetime)`.
-- [ ] `app/api/paste.py`: `router = APIRouter(prefix="/api/v1/pastes")` with a `POST ""` route (`status_code=201`) that takes a session from `Depends(get_db)`, inserts the row, commits, and returns `PasteCreated`. Include the router in `main.py`.
-- [ ] Run it and watch it pass. Commit.
+- [x] **Write the test first** (`test_pastes.py`). `test_create_returns_201_with_id_and_share_url` posts `{"text": "hello\n  world"}` and checks for status 201, a body with a valid UUID `id`, `share_url == f"{PUBLIC_BASE_URL}/view/{id}"`, and an ISO `created_at`.
+- [x] Run it and **watch it fail** (404, because there's no route yet).
+- [x] `app/schemas/paste.py`: `PasteCreate(text: str)` and `PasteCreated(id: UUID, share_url: str, created_at: datetime)`.
+- [x] `app/services/paste.py`: `create_paste(session, text)` inserts the row, commits, and refreshes it (to load `created_at`); `get_paste(session, id)` wraps `session.get`.
+- [x] `app/routes/paste.py`: `router = APIRouter(prefix="/api/v1/pastes")` with a `POST ""` route (`status_code=201`) that takes a session from `Depends(get_db)`, calls the service, commits, and returns `PasteCreated`. Include the router in `main.py`.
+- [x] Run it and watch it pass. Commit.
 
 ### Task 2.2: The text is stored exactly
-- [ ] Test: create a paste containing tabs, leading spaces, `\r\n`, emoji and a trailing newline, then read the row straight from the database and check it equals the input byte for byte.
-- [ ] Make it pass. It should already pass; if it doesn't, something is stripping the text.
-- [ ] Commit.
+- [x] Test: create a paste containing tabs, leading spaces, `\r\n`, emoji and a trailing newline, then read the row straight from the database and check it equals the input byte for byte.
+- [x] Make it pass. It should already pass; if it doesn't, something is stripping the text.
+- [x] Commit.
 
 ### Task 2.3: Empty text is rejected
-- [ ] Tests: `{"text": ""}`, `{"text": "   \n\t"}`, `{}`, and `{"text": 123}` each return 422.
-- [ ] Add a `field_validator("text")` to `PasteCreate` that raises when `not v.strip()`. **Don't change `v` itself**; return it unchanged, because whitespace inside a paste is content.
-- [ ] Commit.
+- [x] Tests: `{"text": ""}`, `{"text": "   \n\t"}`, `{}`, and `{"text": 123}` each return 422.
+- [x] Add a `field_validator("text")` to `PasteCreate` that raises when `not v.strip()`. **Don't change `v` itself**; return it unchanged, because whitespace inside a paste is content.
+- [x] Commit.
 
 ### Task 2.4: Size limit
-- [ ] Tests:
+- [x] Tests:
   - Text of exactly `MAX_PASTE_BYTES` bytes is accepted (201).
   - One byte more returns 413.
   - **Multi-byte case:** text that's under 1 MB *in characters* but over 1 MB *in UTF-8 bytes* (for example, 400,000 × `"é"`, which is 800,000 bytes, plus padding to go just over) returns 413. This test proves you measure bytes, not characters.
-- [ ] In the route, before inserting: `if len(body.text.encode("utf-8")) > settings.max_paste_bytes: raise HTTPException(413, "Paste exceeds 1 MB")`. This goes in the route, not the validator, because a validator can only produce 422.
-- [ ] Commit.
+- [x] In the route, before inserting: `if len(body.text.encode("utf-8")) > settings.max_paste_bytes: raise HTTPException(413, "Paste exceeds 1 MB")`. This goes in the route, not the validator, because a validator can only produce 422.
+- [x] Commit.
 
 ---
 
 ## Phase 3: Reading pastes
 
 ### Task 3.1: `GET /api/v1/pastes/{id}`
-- [ ] Tests:
+- [x] Tests:
   - Create, then get by id: 200 with the same `id`, `text` and `created_at`.
   - A valid but unknown UUID returns 404.
   - **Malformed ids** (`not-a-uuid`, `123`, `c9bf9e57-1685`) return **404, not 422**.
-- [ ] Route: take `paste_id: str` (deliberately not `UUID`, so FastAPI doesn't return its own 422). Parse it with `uuid.UUID(paste_id)`; on `ValueError`, return 404. Use `session.get(Paste, id)`, and return 404 if it's `None`.
-- [ ] Put the parse-and-fetch steps in a small helper (`get_paste_or_404`), because Task 3.2 needs the same thing.
-- [ ] Commit.
+- [x] Route: take `paste_id: str` (deliberately not `UUID`, so FastAPI doesn't return its own 422). Parse it with `uuid.UUID(paste_id)`; on `ValueError`, return 404. Use `session.get(Paste, id)`, and return 404 if it's `None`.
+- [x] Put the parse-and-fetch steps in a small helper (`get_paste_or_404`), because Task 3.2 needs the same thing.
+- [x] Commit.
 
 ### Task 3.2: `GET /api/v1/pastes/{id}/raw`
 - [ ] Tests:

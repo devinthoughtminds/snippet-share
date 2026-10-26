@@ -1,4 +1,4 @@
-# Production stack. Only the nginx gateway is reachable from the host (port 3000).
+# Production stack. Only the nginx gateway is reachable from the host: port 3000 (app) and 8001 (MCP server).
 # Dev: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 services:
   db:
@@ -32,16 +32,32 @@ services:
     build: ./frontend
     restart: unless-stopped
 
+  mcp:
+    build: ./mcp-server
+    restart: unless-stopped
+    environment:
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8001
+      # The address agents and browsers use, so it's nginx's published port, not the container's.
+      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-http://localhost:${MCP_HOST_PORT:-8001}}
+      MCP_PASSWORD: ${MCP_PASSWORD:?copy .env.example to .env}
+      MCP_JWT_SECRET: ${MCP_JWT_SECRET:?copy .env.example to .env}
+      SNIPPET_API_URL: http://backend:8000
+    depends_on:
+      - backend
+
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
     ports:
       - "3000:80"
+      - "${MCP_HOST_PORT:-8001}:8001"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - backend
       - frontend
+      - mcp
 
 volumes:
   pgdata:

@@ -1,0 +1,18 @@
+[project]
+name = "snippet-share-test-agent"
+version = "0.1.0"
+description = "Google ADK agent on Vertex AI for testing the snippet-share MCP server end to end"
+requires-python = ">=3.14"
+dependencies = [
+    "google-adk[mcp]>=2.13.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.1",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]

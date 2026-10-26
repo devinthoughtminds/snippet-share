@@ -1,0 +1,20 @@
+[project]
+name = "snippet-share-mcp"
+version = "0.1.0"
+description = "MCP server that lets coding agents share text as a snippet-share link"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.1",
+    "mcp>=2.3.0",
+    "pyjwt>=2.10.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]

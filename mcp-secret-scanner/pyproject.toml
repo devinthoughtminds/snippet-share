@@ -1,0 +1,19 @@
+[project]
+name = "snippet-share-secret-scanner"
+version = "0.1.0"
+description = "Stateless MCP server that finds and redacts secrets in text before it is shared"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=2.3.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]

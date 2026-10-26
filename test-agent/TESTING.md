@@ -1,8 +1,15 @@
-# Testing the agent ↔ MCP server flow
+# Testing the agent with its two MCP servers
 
-A manual test plan for checking that a real agent can log in to the snippet-share MCP server, receive a JWT, and call `share_snippet` to get a working share link.
+A manual test plan for the ADK test agent and the two MCP servers it uses:
 
-> **Port note:** this guide says `8001` for the MCP server. On your machine 8001 is taken by another project, so `.env` sets `MCP_HOST_PORT=8002`. Read every `localhost:8001` below as `localhost:8002`.
+| Server | Address (your machine) | Style | Tools |
+|---|---|---|---|
+| `snippet-share` ([mcp-server/](../mcp-server/)) | http://localhost:8002/mcp | **stateful**, OAuth 2.1 login, JWT | `share_snippet` |
+| `secret-scanner` ([mcp-secret-scanner/](../mcp-secret-scanner/)) | http://localhost:8003/mcp | **stateless**, no login | `scan_secrets`, `redact_secrets` |
+
+The agent is told to scan text for secrets before sharing it, and to ask you before sharing anything the scan flags.
+
+> **Ports and password on this machine:** the snippet-share MCP server is on **8002**, because another project uses 8001 (`MCP_HOST_PORT=8002` in the root `.env`; the default is 8001). The login password is **`tom`** (`MCP_PASSWORD` in the root `.env`).
 
 ## The pieces
 
@@ -10,40 +17,44 @@ A manual test plan for checking that a real agent can log in to the snippet-shar
 flowchart LR
     You((You)) -->|chat| ADK["ADK agent<br/>adk web :8080<br/>(your terminal)"]
     ADK -->|Gemini calls| Vertex[Vertex AI<br/>gemini-3.1-flash-lite]
-    ADK -->|MCP over HTTP + Bearer JWT| N8001
+    ADK -->|MCP + Bearer JWT<br/>stateful| N8002
+    ADK -->|MCP, no auth<br/>stateless| N8003
 
     subgraph Docker Compose
-        N8001[nginx :8001] --> MCP[mcp server]
+        N8002[nginx :8002] --> MCP[mcp<br/>snippet-share]
+        N8003[nginx :8003] --> SCAN[mcp-secret-scanner]
         N3000[nginx :3000] -->|/api| API[backend]
         N3000 -->|/| FE[frontend]
         MCP -->|POST /api/v1/pastes| API
         API --> DB[(postgres)]
     end
 
-    Browser((Browser)) -->|login page| N8001
+    Browser((Browser)) -->|login page| N8002
     Friend((Friend)) -->|share link| N3000
 ```
 
 | Address | What it is |
 |---|---|
 | http://localhost:3000 | the snippet-share app; share links point here |
-| http://localhost:8001/mcp | the MCP endpoint the agent connects to |
-| http://localhost:8001/login | the password page the browser lands on |
+| http://localhost:8002/mcp | the snippet-share MCP endpoint (needs a JWT) |
+| http://localhost:8002/login | the password page the browser lands on |
+| http://localhost:8003/mcp | the secret-scanner MCP endpoint (open, stateless) |
 | http://localhost:8080 | the ADK web UI where you chat with the agent |
+| http://localhost:8765/callback | the agent's one-shot listener that catches the login code |
 
-## The login flow, step by step
+## Flow 1: login and share (stateful server)
 
 ```mermaid
 sequenceDiagram
     participant A as ADK agent
     participant B as Browser
-    participant M as MCP server
+    participant M as snippet-share MCP
     participant S as snippet-share API
 
-    A->>M: POST /mcp (no token)
+    A->>M: POST /mcp initialize (no token)
     M-->>A: 401, WWW-Authenticate: resource_metadata=...
     A->>M: GET /.well-known/oauth-protected-resource/mcp
-    M-->>A: authorization_servers: [http://localhost:8001]
+    M-->>A: authorization_servers: [http://localhost:8002]
     A->>M: GET /.well-known/oauth-authorization-server
     M-->>A: authorize, token and register endpoints
     A->>M: POST /register
@@ -58,93 +69,154 @@ sequenceDiagram
     A->>M: POST /token (code + code_verifier)
     Note over M: checks the verifier hashes to the challenge
     M-->>A: access_token (JWT, 1h) + refresh_token
-    A->>M: POST /mcp, Authorization: Bearer JWT
+    A->>M: POST /mcp initialize, Authorization: Bearer JWT
     Note over M: verifies signature, exp, iss, aud
-    M-->>A: tools: share_snippet
-    A->>M: call share_snippet(text)
+    M-->>A: 200 + Mcp-Session-Id: abc
+    A->>M: tools/list (JWT + Mcp-Session-Id: abc)
+    A->>M: tools/call share_snippet (JWT + Mcp-Session-Id: abc)
     M->>S: POST /api/v1/pastes
     S-->>M: share_url
     M-->>A: http://localhost:3000/view/<id>
 ```
 
-The agent side is all inside the `mcp` SDK's `OAuthClientProvider`, plus our browser opener and callback listener in [snippet_agent/oauth.py](snippet_agent/oauth.py). The server side is in [mcp-server/auth.py](../mcp-server/auth.py) and [mcp-server/server.py](../mcp-server/server.py).
+The agent's half of the login is the `mcp` SDK's `OAuthClientProvider`, plus our browser opener and callback listener in [snippet_agent/oauth.py](snippet_agent/oauth.py). The server's half is in [mcp-server/auth.py](../mcp-server/auth.py) and [mcp-server/server.py](../mcp-server/server.py).
+
+## Flow 2: scan (stateless server)
+
+```mermaid
+sequenceDiagram
+    participant A as ADK agent
+    participant X as secret-scanner MCP
+
+    A->>X: POST /mcp initialize
+    X-->>A: 200 JSON (no Mcp-Session-Id), then forgets
+    A->>X: POST /mcp tools/call scan_secrets(text)
+    X-->>A: 200 JSON {found, findings[type, line, preview]}
+    A->>X: POST /mcp tools/call redact_secrets(text)
+    X-->>A: 200 JSON text with [REDACTED:<type>]
+```
+
+There's no token and no session id: each request stands alone, and any copy of the server could answer it. The code is in [mcp-secret-scanner/server.py](../mcp-secret-scanner/server.py) (look at `streamable_app()`) and [scanner.py](../mcp-secret-scanner/scanner.py).
 
 ## Setup (once)
 
 1. Start Docker Desktop.
-2. Make sure the repo-root `.env` has `MCP_PASSWORD` and `MCP_JWT_SECRET`; see `.env.example`.
-3. Run `gcloud auth application-default login`, so the agent can call Vertex AI.
-4. `test-agent/snippet_agent/.env` holds the Vertex settings and `MCP_URL=http://localhost:8001/mcp`.
+2. The repo-root `.env` has `MCP_PASSWORD`, `MCP_JWT_SECRET` and `MCP_HOST_PORT=8002` (see `.env.example`). `MCP_SCANNER_HOST_PORT` is optional; it defaults to 8003.
+3. Run `gcloud auth application-default login`, so the agent can call Vertex AI. Redo it whenever you get `invalid_grant`.
+4. `test-agent/snippet_agent/.env` holds:
+   ```
+   GOOGLE_GENAI_USE_VERTEXAI=TRUE
+   GOOGLE_CLOUD_PROJECT=nft-ai-product-dev-prj
+   GOOGLE_CLOUD_LOCATION=global
+   AGENT_MODEL=gemini-3.1-flash-lite
+   MCP_URL=http://localhost:8002/mcp
+   SCANNER_URL=http://localhost:8003/mcp
+   ```
 
 ## Start
 
-**Terminal 1** (repo root):
+**Terminal 1** (repo root): the whole stack.
 
 ```powershell
 docker compose up --build
 ```
 
-**Terminal 2:**
+`docker compose ps` should show `db`, `backend`, `frontend`, `mcp`, `mcp-secret-scanner` and `nginx` running.
+
+**Terminal 2:** both MCP servers' request logs.
 
 ```powershell
-docker compose logs -f mcp
+docker compose logs -f mcp mcp-secret-scanner
 ```
 
-Keep this open. Every OAuth step shows up here as a request line.
-
-**Terminal 3:**
+**Terminal 3:** the agent.
 
 ```powershell
 cd test-agent
 uv run adk web --port 8080
 ```
 
-## Main scenario: share code with a friend
+> Restart `adk web` (Ctrl+C, then run it again) whenever you rebuild or restart the `mcp` container. The server forgets the agent's registration, so an agent left running can't log in again.
+
+## Scenario 1: share code with a friend
 
 | # | Do | Expect |
 |---|---|---|
 | 1 | Open http://localhost:8080 and pick `snippet_agent` | the chat opens |
-| 2 | Send: *Write a Python function that checks if a string is a palindrome, then give me a share link for it.* | a browser tab opens on http://localhost:8001/login. Terminal 3 also prints the URL |
-| 3 | Look at terminal 2 | `POST /mcp` 401, then the two `/.well-known/...` requests, then `POST /register` 201 and `GET /authorize` 302 |
-| 4 | Type the `MCP_PASSWORD` and press Allow | the tab says "Logged in. You can close this tab…" |
-| 5 | Look at terminal 2 again | `POST /login` 302, `POST /token` 200, then `POST /mcp` 200 |
-| 6 | Look at the chat | the agent shows the code and a link like `http://localhost:3000/view/<id>`. ADK's event panel shows a `share_snippet` function call with the code as `text` |
+| 2 | Send: *Write a Python function that checks if a string is a palindrome, then give me a share link for it.* | the events panel shows `scan_secrets` first (it finds nothing). Then a browser tab opens on http://localhost:8002/login, and terminal 3 also prints the URL |
+| 3 | Look at terminal 2 | `mcp-secret-scanner`: `POST /mcp 200` lines. `mcp`: `POST /mcp 401`, the two `/.well-known/...` requests, `POST /register 201` and `GET /authorize 302` |
+| 4 | Type the password (`tom`) and press Allow | the tab says "Logged in. You can close this tab…" |
+| 5 | Look at terminal 2 again | `mcp`: `POST /login 302`, `POST /token 200`, then `POST /mcp 200` |
+| 6 | Look at the chat | the agent shows the code and a link like `http://localhost:3000/view/<id>`. The events panel shows `scan_secrets`, then `share_snippet` with the code as `text` |
 | 7 | Open the link in a private window (as your friend would) | the snippet page shows exactly the code the agent wrote |
 | 8 | Open `http://localhost:3000/api/v1/pastes/<id>/raw` | the same code as plain text |
 | 9 | Ask for a second link: *share a JavaScript version too* | a new link. No login tab this time: the agent reuses its JWT |
 
-**Pass:** steps 6 to 9 work, and step 9 needs no new login.
+**Pass:** steps 6 to 9 work, `scan_secrets` runs before each `share_snippet`, and step 9 needs no new login.
+
+## Scenario 2: the secret scanner stops a leak
+
+| # | Do | Expect |
+|---|---|---|
+| S1 | Send: *Share this config with my friend:* followed by `DATABASE_URL=postgresql://app:hunter2pass@db/prod` and `AWS_KEY=AKIAIOSFODNN7EXAMPLE` | the events panel shows a `scan_secrets` call, and **no** `share_snippet` call |
+| S2 | Read the reply | the agent lists two findings (`url_password` on line 1, `aws_access_key` on line 2) and asks whether to share the redacted version. Nothing is shared yet |
+| S3 | Reply *share the redacted one* | `redact_secrets`, then `share_snippet`. Open the link: it shows `[REDACTED:url_password]` and `[REDACTED:aws_access_key]`, and no secret values |
+| S4 | Send: *share this: print("hello")* | `scan_secrets` finds nothing, and the agent shares straight away |
+| S5 | Compare the two servers in terminal 2 during S1–S4 | `mcp-secret-scanner` shows only `POST /mcp 200`, one per call. `mcp` also shows `GET` / `DELETE /mcp`, which are its session's stream and teardown |
+| S6 | `docker compose restart mcp-secret-scanner`, then repeat S4 | it still works, with no reconnect errors: there was no session to lose |
+
+**Pass:** S2 shares nothing until you answer, S3's link contains no secrets, and S6 works.
 
 ## Negative and edge cases
 
-Run the `curl.exe` commands in PowerShell.
+Run these in PowerShell from the repo root.
 
 | # | Case | How | Expect | What it shows |
 |---|---|---|---|---|
-| N1 | No token | `curl.exe -i -X POST http://localhost:8001/mcp -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d "{}"` | `401` and a `www-authenticate` header pointing to the metadata URL | the server refuses anonymous calls and tells clients where to log in |
-| N2 | Discovery | `curl.exe http://localhost:8001/.well-known/oauth-protected-resource/mcp` and `curl.exe http://localhost:8001/.well-known/oauth-authorization-server` | JSON naming the login server and its endpoints, with `code_challenge_methods_supported: ["S256"]` | how the agent finds the login server without being told |
+| N1 | No token | `curl.exe -i -X POST http://localhost:8002/mcp -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d "{}"` | `401` and a `www-authenticate` header pointing to the metadata URL | the server refuses anonymous calls and tells clients where to log in |
+| N2 | Discovery | `curl.exe http://localhost:8002/.well-known/oauth-protected-resource/mcp` and `curl.exe http://localhost:8002/.well-known/oauth-authorization-server` | JSON naming the login server and its endpoints, with `code_challenge_methods_supported: ["S256"]` | how the agent finds the login server without being told |
 | N3 | Made-up token | N1 with `-H "Authorization: Bearer abc.def.ghi"` | `401` | signature checking |
-| N4 | Wrong password | restart `adk web` (it forgets its token), ask for a link, type a wrong password | the page shows "Wrong password." and the agent gets no token. Then type the right one and it continues | the login page decides who gets in |
+| N4 | Wrong password | restart `adk web`, ask for a link, type a wrong password | the page shows "Wrong password." and the agent gets no token. Then type `tom` and it continues | the login page decides who gets in |
 | N5 | Password guessing | on the login page, submit wrong passwords 6+ times quickly | nginx answers `429` | the nginx rate limit on `/login` |
 | N6 | App down | `docker compose stop backend`, then ask for a link | the agent reports *Could not reach snippet-share at http://backend:8000. Is the app running?* Then `docker compose start backend` | errors reach the agent through `ToolError` |
-| N7 | MCP server restart | `docker compose restart mcp`, then ask for a link | it **still works without logging in** | a JWT is checked by signature, not looked up, so it survives a restart. The refresh token and client registration were in memory and are gone, so after the JWT expires (1h) the agent has to log in again |
+| N7 | snippet-share MCP restart | `docker compose restart mcp`, then ask for a link | it works without a login tab, possibly after one retry in terminal 3 | the old session id is gone (stateful), so the agent opens a new session. Its JWT is checked by signature, not looked up, so it's still accepted. The refresh token and client registration are gone, so once the JWT expires (1h) the agent has to log in again |
 | N8 | Signing key changed | change `MCP_JWT_SECRET` in `.env`, run `docker compose up -d mcp`, then ask for a link | the old JWT gets `401`, the refresh fails, and a new login tab opens | every token signed with the old key is invalid at once |
 | N9 | Restart the agent | stop and start `adk web`, then ask for a link | a new login tab | the agent keeps tokens in memory only |
+| N10 | Scanner needs no login, no session | see the script below | `200`, `application/json`, no `mcp-session-id` header, and one finding | a stateless server answers a lone `tools/call` |
+| N11 | Placeholders are not secrets | ask the agent to share `MCP_PASSWORD=change-me` and `API_KEY=${API_KEY}` | `scan_secrets` finds nothing, and the agent shares it | placeholder values are skipped |
+
+N10 script:
+
+```powershell
+$h = @{ Accept = "application/json, text/event-stream"; "MCP-Protocol-Version" = "2025-06-18" }
+$body = '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"scan_secrets","arguments":{"text":"key = \"AKIAIOSFODNN7EXAMPLE\""}}}'
+$r = Invoke-WebRequest -UseBasicParsing -Method Post http://localhost:8003/mcp -ContentType application/json -Headers $h -Body $body
+$r.StatusCode; $r.Headers["Content-Type"]; "session id: [$($r.Headers['mcp-session-id'])]"; $r.Content
+```
 
 ## What to look at when analysing
 
-- **`docker compose logs -f mcp`** shows each OAuth and MCP request with its status. The order should match the sequence diagram above.
-- **ADK web, events panel** shows each Gemini turn, the `share_snippet` call with its arguments, and the tool's response.
-- **Terminal 3** shows the authorization URL printed by the agent, and any ADK errors.
+- **`docker compose logs -f mcp`** shows each OAuth and MCP request with its status. The order should match Flow 1.
+- **`docker compose logs -f mcp-secret-scanner`** should show only `POST /mcp 200` lines, matching Flow 2.
+- **ADK web, events panel** shows each Gemini turn, every tool call with its arguments (`scan_secrets` → `share_snippet`), and each tool's response.
+- **Terminal 3** shows the authorization URL printed by the agent, and any ADK errors. A line like *"will run without the tools from toolset McpToolset"* means one server couldn't be reached.
 - **Inside the JWT:** the claims are `iss`, `aud`, `sub`, `client_id`, `scope`, `iat`, `exp` and `jti`. Don't paste real tokens into websites like jwt.io. The automated test `mcp-server/tests/test_auth.py::test_access_token_is_signed_jwt` decodes one locally.
+- **Automated tests** for each part:
+  - `mcp-server`: `uv run pytest` (11 tests)
+  - `mcp-secret-scanner`: `uv run pytest` (27)
+  - `test-agent`: `uv run pytest` (4)
 
 ## Troubleshooting
 
-| Symptom | Likely cause |
+| Symptom | Likely cause and fix |
 |---|---|
 | No login tab opens | copy the URL printed in terminal 3 into a browser |
-| "Login failed" or the agent hangs after login | port 8765 is in use: set `OAUTH_CALLBACK_PORT` in `snippet_agent/.env` |
+| "Login failed", or the agent hangs after login | port 8765 is in use: set `OAUTH_CALLBACK_PORT` in `snippet_agent/.env` |
+| `502 Bad Gateway` on `/mcp` | nginx can't reach the container: check `docker compose ps`. nginx looks containers up on each request now, so recreating one shouldn't cause this. If it does, run `docker compose up -d --force-recreate nginx` |
+| `Server returned an error response` / tools missing after a rebuild | the `mcp` container restarted and forgot the agent: restart `adk web` |
+| Agent has `share_snippet` but not `scan_secrets` (or the reverse) | that server isn't reachable at `SCANNER_URL` (or `MCP_URL`). Check `docker compose ps` and the ports in `snippet_agent/.env` |
+| Agent shares without scanning | Gemini skipped the instruction: ask it to *scan first*. Try a stronger `AGENT_MODEL` if it keeps happening |
+| `port is already allocated` on `docker compose up` | another project uses the port: change `MCP_HOST_PORT` / `MCP_SCANNER_HOST_PORT` in `.env`, and the matching URL in `snippet_agent/.env` |
 | `invalid_grant` from Google | your Google sign-in expired: run `gcloud auth application-default login` again |
 | Model not found | change `AGENT_MODEL` in `snippet_agent/.env` |
-| Agent says it has no tools | the MCP server isn't reachable at `MCP_URL`: check `docker compose ps` |
 | Links open only on your PC | expected for now: links use `PUBLIC_BASE_URL=http://localhost:3000` until you deploy |

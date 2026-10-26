@@ -1,4 +1,4 @@
-# Production stack. Only the nginx gateway is reachable from the host: port 3000 (app) and 8001 (MCP server).
+# Production stack. Only the nginx gateway is reachable from the host: 3000 (app), 8001 (MCP server), 8003 (secret scanner).
 # Dev: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 services:
   db:
@@ -46,18 +46,28 @@ services:
     depends_on:
       - backend
 
+  # Stateless MCP server: no login, no database, no sessions.
+  mcp-secret-scanner:
+    build: ./mcp-secret-scanner
+    restart: unless-stopped
+    environment:
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8003
+
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
     ports:
       - "3000:80"
       - "${MCP_HOST_PORT:-8001}:8001"
+      - "${MCP_SCANNER_HOST_PORT:-8003}:8003"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - backend
       - frontend
       - mcp
+      - mcp-secret-scanner
 
 volumes:
   pgdata:

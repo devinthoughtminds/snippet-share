@@ -12,6 +12,9 @@ from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel
 
 from scanner import redact, scan
+from snippet_tracing import init_tracing, traced
+
+init_tracing()  # before the tools below are decorated; a no-op unless LANGFUSE_PUBLIC_KEY is set
 
 mcp = MCPServer(
     "secret-scanner",
@@ -33,6 +36,7 @@ class ScanResult(BaseModel):
 
 # Returning a model gives the agent structured JSON (structuredContent) plus an output schema in tools/list.
 @mcp.tool()
+@traced("scan_secrets")
 def scan_secrets(text: str) -> ScanResult:
     """Find API keys, tokens, passwords and private keys in text. Returns each finding's type, line and a masked preview.
 
@@ -43,6 +47,7 @@ def scan_secrets(text: str) -> ScanResult:
 
 
 @mcp.tool()
+@traced("redact_secrets")
 def redact_secrets(text: str) -> str:
     """Return the text with every secret scan_secrets would find replaced by [REDACTED:<type>]. Everything else is kept exactly."""
     return redact(text)

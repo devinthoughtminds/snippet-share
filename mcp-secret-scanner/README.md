@@ -15,6 +15,9 @@ The test agent calls `scan_secrets` before `share_snippet`, and offers the redac
 
 - [scanner.py](scanner.py): the detection rules and `scan` / `redact`, as plain Python with no MCP code. You can test it with no server.
 - [server.py](server.py): wraps them as MCP tools and serves them statelessly.
+- [snippet_tracing.py](snippet_tracing.py): optional Langfuse tracing, shared by this server, `mcp-server` and the test agent. Every exported span is masked with `redact()` (inside JSON-encoded tool arguments too), so secrets never reach the trace store. Off unless `LANGFUSE_PUBLIC_KEY` is set.
+
+This folder is also a small package (only `scanner.py` and `snippet_tracing.py`), installed by `mcp-server` and `test-agent` as a uv path dependency, so there's one rule set.
 
 ## Stateless vs stateful
 
@@ -52,10 +55,15 @@ Compare with the stateful server: `initialize` on `localhost:8002/mcp` (once log
 ```sh
 uv sync
 uv run pytest      # test_scanner.py: detection rules; test_stateless.py: no session id, no handshake, JSON replies
+uv run pytest tests/test_precision.py -s   # precision and recall on the labelled corpus (tests/corpus.json); both must be 1.000
 MCP_PORT=8003 uv run python server.py
 ```
 
 In Docker it runs as `mcp-secret-scanner`, and nginx publishes it on `MCP_SCANNER_HOST_PORT` (default 8003).
+
+**Corpus.** `tests/corpus.json` holds real-shaped secrets of every type above and look-alikes that must not be flagged (placeholders, UUIDs, git SHAs, `password = get_password()`). When you change a rule, add the case that motivated it to the corpus.
+
+**Tracing.** Set `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and `LANGFUSE_BASE_URL` and each tool call becomes a span (`scan_secrets`, `redact_secrets`) nested under the calling agent's trace. Docker Compose fills these from the local Langfuse's keys; see [test-agent/TESTING.md](../test-agent/TESTING.md#traces-and-evals).
 
 ## Limits
 

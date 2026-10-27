@@ -27,7 +27,15 @@ Open the URL `adk web` prints, pick `snippet_agent`, and ask: *"share this code:
 
 The first time, a browser tab opens on the MCP server's login page. Type the password. The agent then receives its JWT and calls `share_snippet`, and the reply contains the link.
 
-Tests: `uv run pytest`.
+Tests: `uv run pytest`. The live evals in `tests/evals` skip unless `MCP_PASSWORD` is set and the stack is up.
+
+## Traces and evals
+
+- [snippet_agent/tracing.py](snippet_agent/tracing.py) sends each conversation to Langfuse as one trace, with the MCP servers' work nested inside, and every secret masked by the scanner's `redact()`. It's on when `LANGFUSE_PUBLIC_KEY` is set in `snippet_agent/.env`.
+- [evals/](evals/) holds the eval cases. `uv run pytest tests/evals` runs them as ADK evals, and `uv run python evals/run_experiment.py` runs them as a Langfuse experiment.
+- With `MCP_PASSWORD` set, the agent logs in to the MCP server with it instead of opening a browser (`password_login` in `oauth.py`), so evals run unattended.
+
+How to start the local Langfuse, read a trace and compare experiment runs: [TESTING.md](TESTING.md#traces-and-evals).
 
 ## Where the login lives
 

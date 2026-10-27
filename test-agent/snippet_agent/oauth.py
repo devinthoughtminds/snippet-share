@@ -9,8 +9,9 @@ browser, and catching the redirect that brings the code back.
 import asyncio
 import os
 import webbrowser
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
+import httpx
 from google.adk.tools.mcp_tool.mcp_session_manager import create_mcp_http_client
 from mcp.client.auth import OAuthClientProvider
 from mcp.shared.auth import AuthorizationCodeResult, OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
@@ -92,6 +93,39 @@ async def open_browser(authorization_url: str) -> None:
     webbrowser.open(authorization_url)
 
 
+_password_code: AuthorizationCodeResult | None = None
+
+
+async def password_login(authorization_url: str) -> None:
+    """Headless login for evals: fills in the MCP server's login form with MCP_PASSWORD instead of opening a browser."""
+    global _password_code
+    async with httpx.AsyncClient(follow_redirects=False, timeout=30) as client:
+        to_login = await client.get(authorization_url)  # 302 to /login?req=...
+        login_url = urljoin(authorization_url, to_login.headers.get("location", ""))
+        if _origin(login_url) != _origin(MCP_URL):  # the password goes only to the MCP server we were configured with
+            raise RuntimeError(f"MCP login page {_origin(login_url)} is not on {_origin(MCP_URL)}; not sending the password")
+        req = parse_qs(urlparse(login_url).query).get("req", [""])[0]
+        resp = await client.post(urljoin(login_url, "/login"), data={"req": req, "password": os.environ["MCP_PASSWORD"]})
+    if resp.status_code != 302:
+        raise RuntimeError(f"MCP login failed: {resp.status_code}")
+    query = {k: v[0] for k, v in parse_qs(urlparse(resp.headers["location"]).query).items()}
+    if "code" not in query:
+        raise RuntimeError(f"MCP login failed: {query.get('error', 'no code in the redirect')}")
+    _password_code = AuthorizationCodeResult(code=query["code"], state=query.get("state"), iss=query.get("iss"))
+
+
+def _origin(url: str) -> str:
+    u = urlparse(url)
+    return f"{u.scheme}://{u.netloc}"
+
+
+async def _password_result() -> AuthorizationCodeResult:
+    return _password_code
+
+
+# MCP_PASSWORD set (evals, experiments): log in with it. Otherwise the browser login, as adk web uses.
+_headless = bool(os.environ.get("MCP_PASSWORD"))
+
 oauth_provider = OAuthClientProvider(
     server_url=MCP_URL,
     client_metadata=OAuthClientMetadata(
@@ -102,8 +136,8 @@ oauth_provider = OAuthClientProvider(
         token_endpoint_auth_method="none",  # a public client: it can't keep a secret, which is why PKCE exists
     ),
     storage=MemoryTokenStorage(),
-    redirect_handler=open_browser,
-    callback_handler=_listener.wait,
+    redirect_handler=password_login if _headless else open_browser,
+    callback_handler=_password_result if _headless else _listener.wait,
 )
 
 

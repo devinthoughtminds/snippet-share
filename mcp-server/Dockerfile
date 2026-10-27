@@ -7,7 +7,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
     PATH="/opt/venv/bin:$PATH"
 
-WORKDIR /app
+# The lock installs the scanner package from ../mcp-secret-scanner, so keep that layout (compose passes it as the `scanner` context).
+WORKDIR /src/mcp-server
+COPY --from=scanner . /src/mcp-secret-scanner
 
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project

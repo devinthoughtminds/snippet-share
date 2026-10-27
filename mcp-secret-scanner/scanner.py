@@ -29,7 +29,7 @@ RULES = [
     Rule(
         "password_assignment",
         re.compile(
-            r"(?i)\b(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret)\b"
+            r"(?i)\b(?:\w*_)?(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret)\b"
             r"[\"']?\s*[:=]\s*[\"'](?P<s>[^\"'\s]{8,})[\"']"
         ),
         0,

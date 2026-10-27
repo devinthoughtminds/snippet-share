@@ -5,9 +5,15 @@ description = "MCP server that lets coding agents share text as a snippet-share 
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
+    # shortcut: pinned to 4.x because google-adk 2.13 caps opentelemetry-sdk<=1.44; move to 5.x when ADK lifts it
+    "langfuse==4.15.6",
     "mcp>=2.3.0",
     "pyjwt>=2.10.0",
+    "snippet-share-secret-scanner",  # snippet_tracing: the same redact() masks every exported span
 ]
+
+[tool.uv.sources]
+snippet-share-secret-scanner = { path = "../mcp-secret-scanner", editable = true }
 
 [dependency-groups]
 dev = [

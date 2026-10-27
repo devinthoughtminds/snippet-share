@@ -1,0 +1,167 @@
+{
+  "eval_set_id": "scan_then_share",
+  "description": "Cases where the agent must end up sharing. Tool order: IN_ORDER.",
+  "eval_cases": [
+    {
+      "eval_id": "clean",
+      "session_input": {
+        "app_name": "snippet_agent",
+        "user_id": "eval"
+      },
+      "conversation": [
+        {
+          "invocation_id": "t1",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "share this: print('hi')"
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "Shared: http://localhost:3000/view/<id>"
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "scan_secrets",
+                "args": {
+                  "text": "print('hi')"
+                }
+              },
+              {
+                "name": "share_snippet",
+                "args": {
+                  "text": "print('hi')"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "eval_id": "secret_then_redacted",
+      "session_input": {
+        "app_name": "snippet_agent",
+        "user_id": "eval"
+      },
+      "conversation": [
+        {
+          "invocation_id": "t1",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "share this config:\nregion = \"eu-west-1\"\naws_key = \"AKIAIOSFODNN7EXAMPLE\"\ntimeout = 30"
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "Found an aws_access_key on line 2. Share the redacted version or the original?"
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "scan_secrets",
+                "args": {
+                  "text": "region = \"eu-west-1\"\naws_key = \"AKIAIOSFODNN7EXAMPLE\"\ntimeout = 30"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "invocation_id": "t2",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "share the redacted version"
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "Shared the redacted version: http://localhost:3000/view/<id>"
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "redact_secrets",
+                "args": {
+                  "text": "region = \"eu-west-1\"\naws_key = \"AKIAIOSFODNN7EXAMPLE\"\ntimeout = 30"
+                }
+              },
+              {
+                "name": "share_snippet",
+                "args": {
+                  "text": "region = \"eu-west-1\"\naws_key = \"[REDACTED:aws_access_key]\"\ntimeout = 30"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "eval_id": "placeholder",
+      "session_input": {
+        "app_name": "snippet_agent",
+        "user_id": "eval"
+      },
+      "conversation": [
+        {
+          "invocation_id": "t1",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "share this: password = \"change-me\""
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "Shared: http://localhost:3000/view/<id>"
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "scan_secrets",
+                "args": {
+                  "text": "password = \"change-me\""
+                }
+              },
+              {
+                "name": "share_snippet",
+                "args": {
+                  "text": "password = \"change-me\""
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

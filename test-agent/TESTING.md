@@ -202,9 +202,68 @@ $r.StatusCode; $r.Headers["Content-Type"]; "session id: [$($r.Headers['mcp-sessi
 - **Terminal 3** shows the authorization URL printed by the agent, and any ADK errors. A line like *"will run without the tools from toolset McpToolset"* means one server couldn't be reached.
 - **Inside the JWT:** the claims are `iss`, `aud`, `sub`, `client_id`, `scope`, `iat`, `exp` and `jti`. Don't paste real tokens into websites like jwt.io. The automated test `mcp-server/tests/test_auth.py::test_access_token_is_signed_jwt` decodes one locally.
 - **Automated tests** for each part:
-  - `mcp-server`: `uv run pytest` (11 tests)
-  - `mcp-secret-scanner`: `uv run pytest` (27)
-  - `test-agent`: `uv run pytest` (4)
+  - `mcp-server`: `uv run pytest` (14 tests)
+  - `mcp-secret-scanner`: `uv run pytest` (44, including the precision corpus)
+  - `test-agent`: `uv run pytest` (18, plus 2 live evals that skip without the stack; see below)
+
+## Traces and evals
+
+Every conversation can be recorded as one trace in a Langfuse running on your machine, and the agent's core rule (scan before sharing, never share a secret without asking) is checked by evals. Both are optional: with no Langfuse keys nothing is traced and nothing changes.
+
+### Start Langfuse
+
+The root `.env` needs the Langfuse block from `.env.example`, with real values (each secret: `openssl rand -hex 32`). Fill `LANGFUSE_INIT_PROJECT_PUBLIC_KEY` / `_SECRET_KEY` too (`pk-lf-...` / `sk-lf-...`): while they are empty, tracing stays off. Then, from the repo root:
+
+```sh
+docker compose --profile langfuse up -d          # six extra containers; a plain `docker compose up` doesn't start them
+curl http://localhost:3100/api/public/health     # {"status":"OK",...} after a minute or two
+```
+
+Open **http://localhost:3100** and log in as `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` from the root `.env`. The org, the project `snippet-share` and its API keys were created on first start; there's no sign-up.
+
+Tracing turns on wherever the keys are set:
+- **The two MCP containers** get them from the root `.env` (`LANGFUSE_INIT_PROJECT_*_KEY`). After changing them: `docker compose up -d --force-recreate mcp mcp-secret-scanner`.
+- **The agent** reads `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and `LANGFUSE_BASE_URL=http://localhost:3100` from `snippet_agent/.env`. Use the same two keys.
+
+Check the keys: `uv run --env-file snippet_agent/.env python -c "from langfuse import Langfuse; print(Langfuse().auth_check())"` prints `True`.
+
+### Read a trace
+
+Run Scenario 1 in `adk web`, then open **Tracing** in Langfuse. Each turn is one trace, grouped by the ADK session under **Sessions**. Inside it:
+
+| Span | Where it runs | What it shows |
+|---|---|---|
+| `invocation [snippet_agent]` → `agent_run` → `invoke_agent` | agent | the whole turn; `invoke_agent` holds the Gemini calls, tokens and cost |
+| `scan_secrets` / `share_snippet` (type TOOL) | agent | the tool call Gemini asked for, with its arguments |
+| `MCP send tools/call <tool>` | agent (MCP client) | the HTTP call to the MCP server |
+| `<tool>` (TOOL), then `<tool>` (SPAN) | inside the MCP server | the server receiving the call, then the tool function itself: the scanner's findings, or the snippet API's link or error |
+
+The server spans sit inside the agent's tool span because ADK sends the trace id along with each tool call, so one trace shows both sides.
+
+### Check the masking
+
+Run Scenario 2 (a config with `AKIAIOSFODNN7EXAMPLE`). In its trace, the prompt, the tool arguments and the server spans show `[REDACTED:aws_access_key]` and never the key. Every service masks its spans with the scanner's own `redact()` before they leave the process, so this holds for anything the scanner detects. The scanner's preview `AKIA... (20 chars)` is fine: it never contains the key.
+
+### Run the ADK evals
+
+The eval cases live in `evals/`: `shares/` (must end in a share, tool order checked with `IN_ORDER`) and `blocks/` (a secret must stop the share, `EXACT`, so any `share_snippet` call fails it). A Gemini judge also checks each reply against the rubrics in each folder's `test_config.json`.
+
+```sh
+# The Docker stack running; Vertex sign-in done. MCP_PASSWORD is the stack's MCP password: the agent logs in with it, no browser.
+MCP_PASSWORD=<password> uv run pytest tests/evals -v -s      # PowerShell: $env:MCP_PASSWORD="<password>"; uv run pytest tests/evals -v -s
+```
+
+About 3 minutes and a few thousand Vertex tokens. Each run creates real pastes. Without `MCP_PASSWORD`, Vertex settings or a reachable MCP server, the evals are skipped and the reason is printed. If a case fails because the agent did the wrong thing, that's a finding about the agent: don't lower the threshold.
+
+### Run an experiment and compare runs
+
+The same cases, run through the agent as a Langfuse experiment, scored per case (`scanned_first`, `no_unapproved_secret_shared`, `link_when_clean`) and overall (`pass_rate`):
+
+```sh
+MCP_PASSWORD=<password> uv run python evals/run_experiment.py
+```
+
+It prints the scores and a link. In Langfuse: **Datasets → snippet-agent/scan-then-share → Runs**. Each run is named `<model>-<instruction hash>-<time>`, so after changing `AGENT_MODEL` or the agent's instruction, run it again and select both runs to compare them side by side. Each case's row links to its full, masked trace.
 
 ## Troubleshooting
 
@@ -219,4 +278,8 @@ $r.StatusCode; $r.Headers["Content-Type"]; "session id: [$($r.Headers['mcp-sessi
 | `port is already allocated` on `docker compose up` | another project uses the port: change `MCP_HOST_PORT` / `MCP_SCANNER_HOST_PORT` in `.env`, and the matching URL in `snippet_agent/.env` |
 | `invalid_grant` from Google | your Google sign-in expired: run `gcloud auth application-default login` again |
 | Model not found | change `AGENT_MODEL` in `snippet_agent/.env` |
+| Langfuse at :3100 doesn't load | `docker compose --profile langfuse ps`: all six must be up; `langfuse-web` takes a minute or two on first start. Missing secrets in the root `.env` make Postgres or Langfuse exit at start |
+| No traces in Langfuse | the keys are unset or don't match `LANGFUSE_INIT_PROJECT_*_KEY` (run the `auth_check` above); for the MCP servers, recreate their containers after changing `.env` |
+| `uv --env-file` fails at position 0 | `snippet_agent/.env` starts with a byte-order mark; save it as UTF-8 without BOM |
+| Evals skipped | the reason is printed: set `MCP_PASSWORD`, fill `snippet_agent/.env`, or start the stack |
 | Links open only on your PC | expected for now: links use `PUBLIC_BASE_URL=http://localhost:3000` until you deploy |

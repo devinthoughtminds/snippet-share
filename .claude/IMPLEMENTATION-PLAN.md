@@ -549,6 +549,21 @@ A second, separate MCP server, built to learn the stateless transport. It also s
 
 ---
 
+## Phase 14: Observability and evals
+
+Traces for the test agent and both MCP servers in a self-hosted Langfuse, with secrets masked, plus evals for the scan-then-share rule. Design: [docs/superpowers/specs/2026-10-27-agent-observability-and-evals-design.md](../docs/superpowers/specs/2026-10-27-agent-observability-and-evals-design.md). Plan: [docs/superpowers/plans/2026-10-27-agent-observability-and-evals.md](../docs/superpowers/plans/2026-10-27-agent-observability-and-evals.md).
+
+- [x] Scanner precision corpus (`tests/corpus.json`): precision and recall 1.000. It caught prefixed names like `db_password = "..."`, which the `password_assignment` rule now finds.
+- [x] `snippet_tracing.py` (packaged with the scanner, shared by all three): Langfuse client with `mask_otel_spans` using `redact()`, including JSON-encoded tool arguments; `@traced` tools; off without `LANGFUSE_PUBLIC_KEY`.
+- [x] Both MCP servers traced. The scanner reaches `mcp-server`'s Docker build as a second build context (`additional_contexts`).
+- [x] Local Langfuse v4 as compose profile `langfuse` (UI on :3100, no storage ports, headless init from `.env`).
+- [x] Agent traced with `openinference-instrumentation-google-adk`; server spans nest under the agent's tool spans (the MCP client's `tools/call` span is exported to link them).
+- [x] Headless MCP login (`MCP_PASSWORD`) and ADK evals in `evals/shares` (IN_ORDER) and `evals/blocks` (EXACT), with rubric checks. Both pass live.
+- [x] Langfuse experiment `evals/run_experiment.py` on dataset `snippet-agent/scan-then-share`; runs compare side by side.
+- [ ] Score live traces automatically (deferred).
+
+---
+
 ## Things that are easy to get wrong
 
 | Area | Mistake | What to do instead |
@@ -572,3 +587,6 @@ A second, separate MCP server, built to learn the stateless transport. It also s
 | API docs | Leaving FastAPI's docs at `/docs`, where the gateway sends them to the frontend | `docs_url="/api/docs"`, `openapi_url="/api/openapi.json"` |
 | Postgres init | Adding `db/init` after the volume exists | Init scripts only run on an empty volume. `down -v` once |
 | Async tests | Engine and tests on different event loops | Session-scoped loop in `pytest.ini` |
+| Compose profiles | `${VAR:?message}` in a profile-only service fails `docker compose up` for everyone, even with the profile off | Use `${VAR:-}` there and let the service itself refuse to start without it |
+| Langfuse + MCP | The server's spans show up loose in the trace, not under the tool call | Langfuse's default filter drops the MCP client's `MCP send tools/call` span (no `gen_ai.*` attributes), which is their parent. Export it with `should_export_span` |
+| Tracing decorators | Calling `init_tracing()` in `__main__`, after module-level `@traced` already ran | Initialise at import, before the decorated functions |

@@ -74,3 +74,13 @@ def test_redact_replaces_only_the_secrets():
 def test_redact_leaves_clean_text_untouched():
     text = "a\r\n  b\t😀\n"
     assert redact(text) == text
+
+
+@pytest.mark.parametrize("text", ['db_password = "Tr0ub4dor&3x"', "smtp-api-key: 'k8Jq2LmZ9xP4'", 'GH_TOKEN: "a8f5f167f44f4964"'])
+def test_finds_assignment_with_prefixed_name(text):
+    assert [f["type"] for f in scan(text)] == ["password_assignment"]
+
+
+@pytest.mark.parametrize("text", ['password_hint = "remember the dog"', 'aws_secret_region = "eu-west-1x"'])
+def test_prefixed_rule_still_needs_whole_keyword(text):
+    assert scan(text) == []

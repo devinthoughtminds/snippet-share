@@ -19,6 +19,9 @@ The snippet-share app must be running too (`docker compose -f docker-compose.dev
 | `MCP_PUBLIC_URL` | `http://localhost:8001` | the address agents use to reach this server |
 | `MCP_PORT` / `MCP_HOST` | `8001` / `127.0.0.1` | where it listens |
 | `SNIPPET_API_URL` | `http://localhost:8000` | the snippet-share API (`http://localhost:3000` with the full compose stack) |
+| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_BASE_URL` | (unset: tracing off) | optional: each `share_snippet` call becomes a masked span in Langfuse, with the API's status or error, nested under the agent's trace. See [test-agent/TESTING.md](../test-agent/TESTING.md#traces-and-evals) |
+
+The masking and tracing code comes from `../mcp-secret-scanner` (a uv path dependency), which is why the Docker build also gets that folder as a second build context.
 
 Tests: `uv run pytest`. To run one: `uv run pytest tests/test_auth.py::test_full_login_flow_gives_working_token`.
 

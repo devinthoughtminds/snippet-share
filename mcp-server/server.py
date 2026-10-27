@@ -12,6 +12,9 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from auth import InMemoryAuthProvider
+from snippet_tracing import init_tracing, traced
+
+init_tracing()  # before share_snippet is decorated; a no-op unless LANGFUSE_PUBLIC_KEY is set
 
 API_URL = os.environ.get("SNIPPET_API_URL", "http://localhost:8000").rstrip("/")
 PUBLIC_URL = os.environ.get("MCP_PUBLIC_URL", "http://localhost:8001").rstrip("/")
@@ -36,6 +39,7 @@ mcp = MCPServer(
 
 # The agent sees the name, type hints and docstring below; they are how it decides to call this tool.
 @mcp.tool()
+@traced("share_snippet")
 async def share_snippet(text: str) -> str:
     """Save text (code, docs, a chat excerpt) to snippet-share and return a shareable link.
 

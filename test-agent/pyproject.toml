@@ -5,10 +5,18 @@ description = "Google ADK agent on Vertex AI for testing the snippet-share MCP s
 requires-python = ">=3.14"
 dependencies = [
     "google-adk[mcp]>=2.13.0",
+    # shortcut: pinned to 4.x because google-adk 2.13 caps opentelemetry-sdk<=1.44; move to 5.x when ADK lifts it
+    "langfuse==4.15.6",
+    "openinference-instrumentation-google-adk==1.0.5",
+    "snippet-share-secret-scanner",  # snippet_tracing: the same redact() masks every exported span
 ]
+
+[tool.uv.sources]
+snippet-share-secret-scanner = { path = "../mcp-secret-scanner", editable = true }
 
 [dependency-groups]
 dev = [
+    "google-adk[eval]>=2.13.0",  # AgentEvaluator for tests/evals
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.1",
 ]

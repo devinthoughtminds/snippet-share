@@ -1,0 +1,201 @@
+[
+  {
+    "text": "KEY = '''-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gun\nVTLw7onLRnrq0/IzW7yWR7QkrmBL7jTKEn5u+qKhbwKfBstIs+bMY2Zkp18gnTxK\n-----END RSA PRIVATE KEY-----'''\n",
+    "expect": [
+      "private_key"
+    ]
+  },
+  {
+    "text": "deploy:\n  ssh_key: |\n    -----BEGIN OPENSSH PRIVATE KEY-----\n    b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n    -----END OPENSSH PRIVATE KEY-----\n",
+    "expect": [
+      "private_key"
+    ]
+  },
+  {
+    "text": "headers = {\"Authorization\": \"Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U\"}\n",
+    "expect": [
+      "jwt"
+    ]
+  },
+  {
+    "text": "auth:\n  access_token: \"eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzbmlwcGV0LXNoYXJlIn0.Q2hhbmdlZFNpZ25hdHVyZVZhbHVlMTIz\"\n",
+    "expect": [
+      "jwt"
+    ]
+  },
+  {
+    "text": "import boto3\ns3 = boto3.client(\"s3\", aws_access_key_id=\"AKIAIOSFODNN7EXAMPLE\")\n",
+    "expect": [
+      "aws_access_key"
+    ]
+  },
+  {
+    "text": "[default]\naws_access_key_id = ASIAY34FZKBOKMUTVV7A\nregion = eu-west-1\n",
+    "expect": [
+      "aws_access_key"
+    ]
+  },
+  {
+    "text": "git clone https://ghp_A1b2C3d4A1b2C3d4A1b2C3d4A1b2C3d4E5f6@github.com/acme/app.git\n",
+    "expect": [
+      "github_token"
+    ]
+  },
+  {
+    "text": "GITHUB_TOKEN=github_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz\n",
+    "expect": [
+      "github_token"
+    ]
+  },
+  {
+    "text": "const firebaseConfig = { apiKey: \"AIzaSyD-1234567890abcdefghijklmnopqrstu\" };\n",
+    "expect": [
+      "google_api_key"
+    ]
+  },
+  {
+    "text": "<script src=\"https://maps.googleapis.com/maps/api/js?key=AIzaSyB_0987654321zyxwvutsrqponmlkjihgf&callback=init\"></script>\n",
+    "expect": [
+      "google_api_key"
+    ]
+  },
+  {
+    "text": "SLACK_BOT_TOKEN=xoxb-2048-4096-AbCdEfGhIjKlMnOp\n",
+    "expect": [
+      "slack_token"
+    ]
+  },
+  {
+    "text": "client = WebClient(token=\"xoxp-1111-2222-3333-QwErTyUiOp\")\n",
+    "expect": [
+      "slack_token"
+    ]
+  },
+  {
+    "text": "OPENAI_API_KEY=sk-proj-Ab12Cd34Ef56Gh78Ij90Kl12\n",
+    "expect": [
+      "api_key"
+    ]
+  },
+  {
+    "text": "client = Anthropic(api_key=\"sk-ant-api03-Zx98Yw76Vu54Ts32Rq10\")\n",
+    "expect": [
+      "api_key"
+    ]
+  },
+  {
+    "text": "DATABASE_URL=postgres://app:s3cr3tPassw0rd@db:5432/app\n",
+    "expect": [
+      "url_password"
+    ]
+  },
+  {
+    "text": "cache:\n  url: redis://default:Xk29dLq0@cache:6379/0\n",
+    "expect": [
+      "url_password"
+    ]
+  },
+  {
+    "text": "db_password = \"Tr0ub4dor&3x\"\nconnect(db_password)\n",
+    "expect": [
+      "password_assignment"
+    ]
+  },
+  {
+    "text": "oauth:\n  client_id: snippet-web\n  client_secret: 'a8f5f167f44f4964e6c998dee827110c'\n",
+    "expect": [
+      "password_assignment"
+    ]
+  },
+  {
+    "text": "POSTGRES_USER=app\nPOSTGRES_PASSWORD=Sup3rS3cretValue\n",
+    "expect": [
+      "env_secret"
+    ]
+  },
+  {
+    "text": "export JWT_SECRET=9c1f0e7a4b2d8e6f\n",
+    "expect": [
+      "env_secret"
+    ]
+  },
+  {
+    "text": "aws_key = \"AKIAIOSFODNN7EXAMPLE\"\nDB_PASSWORD=Sup3rS3cretValue\n",
+    "expect": [
+      "aws_access_key",
+      "env_secret"
+    ]
+  },
+  {
+    "text": "password = \"change-me\"\n",
+    "expect": []
+  },
+  {
+    "text": "API_TOKEN=${API_TOKEN}\n",
+    "expect": []
+  },
+  {
+    "text": "token: \"<your-token>\"\n",
+    "expect": []
+  },
+  {
+    "text": "SECRET_KEY=xxxxxxxxxxxx\n",
+    "expect": []
+  },
+  {
+    "text": "password = get_password()\n",
+    "expect": []
+  },
+  {
+    "text": "db_password=hunter2hunter2\n",
+    "expect": []
+  },
+  {
+    "text": "request_id = \"3f2b8c1e-9a4d-4e6b-8f0a-2c7d5e1b9a3f\"\n",
+    "expect": []
+  },
+  {
+    "text": "commit 0cc16894386014e59f82bc2cd270477d17bc2b1e\n",
+    "expect": []
+  },
+  {
+    "text": "<img src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk\">\n",
+    "expect": []
+  },
+  {
+    "text": "key = \"sk-short123\"\n",
+    "expect": []
+  },
+  {
+    "text": "header = 'eyJhbGciOiJIUzI1NiJ9'\n",
+    "expect": []
+  },
+  {
+    "text": "see https://docs.example.com/setup?user=bob\n",
+    "expect": []
+  },
+  {
+    "text": "password: \"\"\n",
+    "expect": []
+  },
+  {
+    "text": "token = \"short\"\n",
+    "expect": []
+  },
+  {
+    "text": "Set PASSWORD in your .env file before starting.\n",
+    "expect": []
+  },
+  {
+    "text": "SECRET_KEY=\n",
+    "expect": []
+  },
+  {
+    "text": "GH_TOKEN: \"{{ secrets.GH_TOKEN }}\"\n",
+    "expect": []
+  },
+  {
+    "text": "aws_region = 'us-east-1'  # AKIA keys go in the vault\n",
+    "expect": []
+  }
+]

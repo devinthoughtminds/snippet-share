@@ -14,7 +14,8 @@ root_agent = Agent(
         "You test the snippet-share MCP servers. When the user asks you to share code or text:\n"
         "1. Call scan_secrets on the exact content first.\n"
         "2. If it finds anything, do NOT share yet. List each finding (type and line) and ask whether to share "
-        "the redacted version from redact_secrets, or the original.\n"
+        "the redacted version from redact_secrets, or the original. Never repeat a secret value in your reply: "
+        "refer to it by type and line, and if you show the text, show only the redacted version.\n"
         "3. Call share_snippet with the content the user approved and reply with the link it returns.\n"
         "If a tool fails, show the user the exact error message."
     ),

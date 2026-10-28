@@ -46,11 +46,10 @@ async def test_agent_eval(path):
     for k, v in AGENT_ENV.items():
         os.environ.setdefault(k, v)  # the same settings adk web loads, before the agent is imported
 
-    from google.adk.evaluation.agent_evaluator import AgentEvaluator
+    from evals.adk_evals import evaluate_file
 
     try:
-        # Each file's test_config.json sits next to it. A directory would only pick up *.test.json files.
-        await AgentEvaluator.evaluate(agent_module="snippet_agent", eval_dataset_file_path_or_dir=str(path), num_runs=1)
+        await evaluate_file(path)  # one case at a time: parallel cases cut each other's MCP connections
     finally:
         import snippet_tracing
 

@@ -589,4 +589,5 @@ Traces for the test agent and both MCP servers in a self-hosted Langfuse, with s
 | Async tests | Engine and tests on different event loops | Session-scoped loop in `pytest.ini` |
 | Compose profiles | `${VAR:?message}` in a profile-only service fails `docker compose up` for everyone, even with the profile off | Use `${VAR:-}` there and let the service itself refuse to start without it |
 | Langfuse + MCP | The server's spans show up loose in the trace, not under the tool call | Langfuse's default filter drops the MCP client's `MCP send tools/call` span (no `gen_ai.*` attributes), which is their parent. Export it with `should_export_span` |
+| ADK evals | Letting `AgentEvaluator.evaluate()` run a whole eval set: it runs 4 cases at once on one `root_agent`, and each finished case's `Runner` closes the shared MCP toolsets, so the others fail with `Connection closed` | Hand `evaluate_eval_set()` one case at a time (`test-agent/evals/adk_evals.py`) |
 | Tracing decorators | Calling `init_tracing()` in `__main__`, after module-level `@traced` already ran | Initialise at import, before the decorated functions |
